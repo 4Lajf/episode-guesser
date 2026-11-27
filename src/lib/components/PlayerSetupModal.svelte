@@ -12,6 +12,7 @@
 		recentUsers: string[];
 		loading: boolean;
 		error: string | null;
+		activeRunWarning?: string | null;
 		onLoadUser: (username: string, statuses: ListStatus[], includeSingleEp: boolean) => void;
 		onUseGlobal: () => void;
 		onClose: () => void;
@@ -26,6 +27,7 @@
 		recentUsers,
 		loading,
 		error,
+		activeRunWarning = null,
 		onLoadUser,
 		onUseGlobal,
 		onClose
@@ -197,6 +199,10 @@
 						<span>Include single-episode movies and OVAs</span>
 					</label>
 				</div>
+
+				{#if activeRunWarning}
+					<div class="warn-box" role="note">{activeRunWarning}</div>
+				{/if}
 
 				{#if error}
 					<div class="error-box" role="alert">{error}</div>
@@ -419,6 +425,15 @@
 		accent-color: var(--blue);
 		width: 15px;
 		height: 15px;
+	}
+
+	.warn-box {
+		background: var(--yellow-soft);
+		border: 1px solid rgba(242, 209, 107, 0.45);
+		color: var(--paper);
+		border-radius: var(--r);
+		padding: 9px 12px;
+		font-size: 13px;
 	}
 
 	.error-box {

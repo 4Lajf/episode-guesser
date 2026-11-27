@@ -298,10 +298,11 @@ export function buildWordleShareText(params: {
 		if (status === 'close') return '🟨';
 		return '⬛';
 	};
-	const arrow = (dir: Direction) => {
+	const arrow = (dir: Direction, solved: boolean) => {
+		if (solved) return '✅';
 		if (dir === 'up') return '⬆️';
 		if (dir === 'down') return '⬇️';
-		if (dir === 'exact') return '✅';
+		if (dir === 'exact') return '🎯';
 		return '🏳️';
 	};
 
@@ -309,7 +310,7 @@ export function buildWordleShareText(params: {
 		const aTile = tile(a.animeStatus);
 		const yTile = tile(a.yearStatus);
 		const eTile = tile(a.episodeStatus);
-		return `${aTile}${yTile}${eTile} ${arrow(a.episodeDirection)}`;
+		return `${aTile}${yTile}${eTile} ${arrow(a.episodeDirection, a.solved)}`;
 	});
 
 	return [

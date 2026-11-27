@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { POST as guessPost } from '../src/routes/api/guess/+server';
+import { _clearConsumedRoundsForTests, POST as guessPost } from '../src/routes/api/guess/+server';
 import { clearDailyStoreForTests, saveDailyRecord } from '../src/lib/server/dailyStore';
 import type { SealedDailyState, SealedRoundSecret } from '../src/lib/server/picker';
 import { sealPayload } from '../src/lib/server/token';
@@ -41,11 +41,13 @@ function makeEvent(body: unknown, pid?: string) {
 describe('POST /api/guess security & scoring invariants', () => {
 	beforeEach(() => {
 		clearDailyStoreForTests();
+		_clearConsumedRoundsForTests();
 		vi.restoreAllMocks();
 	});
 
 	afterEach(() => {
 		clearDailyStoreForTests();
+		_clearConsumedRoundsForTests();
 	});
 
 	it('rejects tampered roundToken and dailyStateToken payloads', async () => {
@@ -319,5 +321,15 @@ describe('POST /api/guess security & scoring invariants', () => {
 		expect(json.animePoints).toBe(0);
 		expect(json.episodePoints).toBe(0);
 		expect(json.totalPoints).toBe(0);
+
+		// Re-submitting the same Classic roundToken must be rejected with 409 (one-shot enforcement)
+		const replay = await guessPost(
+			makeEvent({
+				roundToken,
+				guessedTitle: REVEAL.titleRomaji,
+				guessedEpisode: 4
+			})
+		);
+		expect(replay.status).toBe(409);
 	});
 });

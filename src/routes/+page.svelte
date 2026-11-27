@@ -13,7 +13,6 @@
 	import {
 		CLASSIC_ROUNDS,
 		CURATED_POOL_SIZE,
-		dropdownDedupeKey,
 		getTodayUtcDate,
 		normalizeTitle,
 		WORDLE_ZOOM_STEPS
@@ -124,26 +123,25 @@
 
 	const activeStreak = $derived(mode === 'classic' ? classicStreak : unlimitedStreak);
 
-	const dropdownTitles = $derived.by(() => {
-		const byKey = new Map<string, string>();
-		for (const t of anisongDbTitles) {
-			const k = dropdownDedupeKey(t);
-			if (k && !byKey.has(k)) byKey.set(k, t);
-		}
-		for (const t of profile.titlesForDropdown) {
-			const k = dropdownDedupeKey(t);
-			if (k && !byKey.has(k)) byKey.set(k, t);
-		}
-		return Array.from(byKey.values()).sort((a, b) =>
-			a.localeCompare(b, 'en', { sensitivity: 'base' })
-		);
-	});
+	// Strictly global autocomplete catalog (Romaji + English from anime-offline-database + AnisongDB)
+	// so the dropdown NEVER reveals whether any anime is on the active user's list or Global Pool.
+	const dropdownTitles = $derived(anisongDbTitles);
 
 	const dailyScopeHintKey = $derived.by(() => {
 		const today = getTodayUtcDate();
 		const useGlobal = profile.isGlobalPool || dailyUseGlobal;
 		if (useGlobal) return `${today}|global`;
-		return `${today}|user:${profile.username.toLowerCase()}:${profile.statuses.slice().sort().join(',')}:${profile.includeSingleEp ? '1' : '0'}`;
+		return `${today}|user:${profile.username.toLowerCase()}`;
+	});
+
+	const activeRunWarning = $derived.by(() => {
+		if (classicHistory.length > 0 && !classicFinished) {
+			return `Changing accounts or list filters will reset your active Classic run (round ${Math.min(classicRoundIndex + 1, CLASSIC_ROUNDS)} of ${CLASSIC_ROUNDS}).`;
+		}
+		if (unlimitedCount > 0 || unlimitedReveal) {
+			return `Changing accounts or list filters will reset your active Unlimited run (${unlimitedScore.toLocaleString('en-US')} pts).`;
+		}
+		return null;
 	});
 
 	function readDailyDoneHint(key: string): boolean {
@@ -998,6 +996,7 @@
 	{recentUsers}
 	loading={setupLoading}
 	error={setupError}
+	{activeRunWarning}
 	onLoadUser={(u, st, inc) => loadProfile(u, st, inc, true, false)}
 	onUseGlobal={() => loadProfile(null, ['COMPLETED'], false, true, false)}
 	onClose={() => (setupOpen = false)}

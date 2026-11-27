@@ -219,6 +219,29 @@ describe('evaluateWordleAttempt & share text', () => {
 		expect(giveUpShare).toContain('🏳️');
 		expect(giveUpShare).not.toContain('✅');
 
+		// Wrong anime with exact episode number must NOT emit ✅ (solved), uses 🎯 instead
+		const wrongAnimeExactEpShare = buildWordleShareText({
+			puzzleNumber: 2,
+			scopeLabel: 'Global Daily',
+			attempts: [
+				{
+					attemptNumber: 1,
+					guessedTitle: 'Steins;Gate',
+					guessedEpisode: 3,
+					guessedYear: 2011,
+					animeStatus: 'miss',
+					yearStatus: 'miss',
+					yearDirection: 'up',
+					episodeStatus: 'close',
+					episodeDirection: 'exact',
+					solved: false
+				}
+			],
+			won: false
+		});
+		expect(wrongAnimeExactEpShare).toContain('🎯');
+		expect(wrongAnimeExactEpShare).not.toContain('✅');
+
 		const classicShare = buildClassicShareText({
 			username: '4Lajf',
 			rounds: [

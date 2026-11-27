@@ -59,16 +59,26 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 		let seedKey = 'global';
 
 		if (!useGlobalPool) {
-			const cleanStatuses = sanitizeStatuses(body.statuses);
-			const includeSingleEp = Boolean(body.includeSingleEp);
-			const profile = await fetchAniListProfile({
+			// Personal Daily uses a stable canonical scope per username so toggling list filters
+			// cannot re-roll today's Daily puzzle.
+			const cleanStatuses =
+				mode === 'daily' ? (['COMPLETED', 'CURRENT'] as ListStatus[]) : sanitizeStatuses(body.statuses);
+			const includeSingleEp = mode === 'daily' ? false : Boolean(body.includeSingleEp);
+			let profile = await fetchAniListProfile({
 				username,
 				statuses: cleanStatuses,
 				includeSingleEp
 			});
+			if (mode === 'daily' && profile.pool.length === 0) {
+				profile = await fetchAniListProfile({
+					username,
+					statuses: ['COMPLETED', 'CURRENT', 'REPEATING', 'PAUSED', 'DROPPED'],
+					includeSingleEp: true
+				});
+			}
 			pool = profile.pool;
 			scopeLabel = `${profile.username}'s list`;
-			scopeKey = `user:${profile.username.toLowerCase()}:${cleanStatuses.slice().sort().join(',')}:${includeSingleEp ? '1' : '0'}`;
+			scopeKey = `user:${profile.username.toLowerCase()}`;
 			seedKey = scopeKey;
 		}
 

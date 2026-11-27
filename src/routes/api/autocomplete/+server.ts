@@ -1,13 +1,13 @@
 import { gzipSync } from 'node:zlib';
 import { json } from '@sveltejs/kit';
-import { getCachedAnisongDbTitles } from '$lib/server/anisongdb';
+import { getGlobalAutocompleteTitles } from '$lib/server/animeCatalog';
 import type { RequestHandler } from './$types';
 
-let cachedGzipKey = -1;
+let cachedGzipKey = '';
 let cachedGzipPayload: Uint8Array | null = null;
 
 export const GET: RequestHandler = async ({ url, request, setHeaders }) => {
-	const { titles, cachedAt } = await getCachedAnisongDbTitles();
+	const { titles, cachedAt } = await getGlobalAutocompleteTitles();
 	const q = url.searchParams.get('q')?.trim().toLowerCase() ?? '';
 	const limitParam = Number(url.searchParams.get('limit') ?? '25');
 	const limit = Number.isFinite(limitParam) ? Math.min(Math.max(1, limitParam), 100) : 25;
@@ -34,11 +34,12 @@ export const GET: RequestHandler = async ({ url, request, setHeaders }) => {
 
 	const acceptEnc = request.headers.get('accept-encoding') ?? '';
 	if (acceptEnc.includes('gzip')) {
-		if (!cachedGzipPayload || cachedGzipKey !== cachedAt) {
+		const cacheSig = `${cachedAt}:${titles.length}`;
+		if (!cachedGzipPayload || cachedGzipKey !== cacheSig) {
 			cachedGzipPayload = new Uint8Array(
 				gzipSync(Buffer.from(JSON.stringify({ titles, total: titles.length, cachedAt }), 'utf8'))
 			);
-			cachedGzipKey = cachedAt;
+			cachedGzipKey = cacheSig;
 		}
 		return new Response(new Uint8Array(cachedGzipPayload), {
 			status: 200,

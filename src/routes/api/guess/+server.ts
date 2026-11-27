@@ -14,6 +14,7 @@ import {
 	sanitizeStatuses,
 	type AnimeLookupResult
 } from '$lib/server/anilist';
+import { lookupCatalogByTitle } from '$lib/server/animeCatalog';
 import { getDailyRecord, saveDailyRecord } from '$lib/server/dailyStore';
 import {
 	mintImageUrl,
@@ -26,10 +27,26 @@ import type { RequestHandler } from './$types';
 
 const ROUND_TTL_MS = 36 * 60 * 60 * 1000; // 36 hours
 const PLAYER_COOKIE = 'eg_pid';
+const MAX_CONSUMED_CLASSIC_ROUNDS = 10_000;
 
 // Synchronous in-flight mutex per (playerId, dailyDate, scopeKey) prevents parallel requests
 // with the same Daily state token from getting multiple feedbacks on a single attempt.
 const inFlightDailySessions = new Set<string>();
+
+// Bounded set of already-scored Classic/Unlimited roundIds so each round token is one-shot.
+const consumedClassicRounds = new Set<string>();
+
+function markClassicRoundConsumed(roundId: string): void {
+	if (consumedClassicRounds.size >= MAX_CONSUMED_CLASSIC_ROUNDS) {
+		const oldest = consumedClassicRounds.values().next().value;
+		if (oldest) consumedClassicRounds.delete(oldest);
+	}
+	consumedClassicRounds.add(roundId);
+}
+
+export function _clearConsumedRoundsForTests(): void {
+	consumedClassicRounds.clear();
+}
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	let body: {
@@ -71,37 +88,72 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	const guessedEpisode =
 		parsedEp !== null && Number.isFinite(parsedEp) && parsedEp >= 1 ? Math.round(parsedEp) : null;
 
-	// Helper: enrich target/franchise titles via AniList ID lookup ONLY when the normalized
-	// title matches the returned AniList entry EXACTLY (prevents partial free-text like "Mushoku"
-	// from scoring exact points via AniList fuzzy search).
-	async function resolveAniListFallback(
+	// Helper: enrich target/franchise titles via local offline catalog first (0ms, zero AniList quota),
+	// then fall back to AniList ID lookup ONLY on exact normalized title match.
+	async function resolveTitleMetadata(
 		currentTargets: string[],
 		currentFranchise: string[]
-	): Promise<{ targets: string[]; franchise: string[]; lookup?: AnimeLookupResult | null }> {
-		if (!guessedTitle) return { targets: currentTargets, franchise: currentFranchise };
+	): Promise<{
+		targets: string[];
+		franchise: string[];
+		year: number | null;
+		lookup?: AnimeLookupResult | null;
+	}> {
+		if (!guessedTitle) return { targets: currentTargets, franchise: currentFranchise, year: null };
 		const direct = matchAnimeTitle(guessedTitle, currentTargets, currentFranchise);
-		if (direct === 'exact') return { targets: currentTargets, franchise: currentFranchise };
+
+		const catalogHit = lookupCatalogByTitle(guessedTitle);
+		if (catalogHit) {
+			if (direct === 'exact' || catalogHit.id === secret!.reveal.anilistId) {
+				return {
+					targets:
+						direct === 'exact' ? currentTargets : [...currentTargets, guessedTitle],
+					franchise: currentFranchise,
+					year: catalogHit.year
+				};
+			}
+			if (direct === 'wrong' && catalogHit.relatedIds.includes(secret!.reveal.anilistId)) {
+				return {
+					targets: currentTargets,
+					franchise: [...currentFranchise, guessedTitle],
+					year: catalogHit.year
+				};
+			}
+			return { targets: currentTargets, franchise: currentFranchise, year: catalogHit.year };
+		}
+
+		if (direct === 'exact') {
+			return { targets: currentTargets, franchise: currentFranchise, year: secret!.reveal.seasonYear };
+		}
 
 		const lookup = await lookupAnimeByTitle(guessedTitle);
-		if (!lookup) return { targets: currentTargets, franchise: currentFranchise, lookup: null };
+		if (!lookup) {
+			return { targets: currentTargets, franchise: currentFranchise, year: null, lookup: null };
+		}
 
 		if (lookup.exactTitleMatch) {
 			if (lookup.id === secret!.reveal.anilistId) {
-				return { targets: [...currentTargets, guessedTitle], franchise: currentFranchise, lookup };
+				return {
+					targets: [...currentTargets, guessedTitle],
+					franchise: currentFranchise,
+					year: lookup.year,
+					lookup
+				};
 			}
 			if (direct === 'wrong' && lookup.relatedIds.includes(secret!.reveal.anilistId)) {
 				return {
 					targets: currentTargets,
 					franchise: [...currentFranchise, guessedTitle],
+					year: lookup.year,
 					lookup
 				};
 			}
 		}
 
-		return { targets: currentTargets, franchise: currentFranchise, lookup };
+		return { targets: currentTargets, franchise: currentFranchise, year: lookup.year, lookup };
 	}
 
-	// Classic / Unlimited evaluation
+	// Classic / Unlimited evaluation (one-shot per roundId)
 	if (secret.mode === 'classic' || secret.mode === 'unlimited') {
 		const skipped = Boolean(body.skipped);
 		if (!skipped && !guessedTitle) {
@@ -111,9 +163,17 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			);
 		}
 
+		if (consumedClassicRounds.has(secret.roundId)) {
+			return json(
+				{ error: 'This round was already scored. Load the next frame.' },
+				{ status: 409 }
+			);
+		}
+		markClassicRoundConsumed(secret.roundId);
+
 		const resolved = skipped
-			? { targets: secret.targetTitles, franchise: secret.franchiseTitles }
-			: await resolveAniListFallback(secret.targetTitles, secret.franchiseTitles);
+			? { targets: secret.targetTitles, franchise: secret.franchiseTitles, year: null }
+			: await resolveTitleMetadata(secret.targetTitles, secret.franchiseTitles);
 
 		const result = evaluateClassicGuess({
 			mode: secret.mode,
@@ -262,17 +322,22 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			);
 		}
 
-		const resolved = await resolveAniListFallback(secret.targetTitles, secret.franchiseTitles);
+		const resolved = await resolveTitleMetadata(secret.targetTitles, secret.franchiseTitles);
 
-		// Resolve guessed anime's release year
-		let guessedYear: number | null = null;
+		// Resolve guessed anime's release year (target -> offline catalog -> curated -> user list -> AniList)
+		let guessedYear: number | null = resolved.year;
 
-		if (resolved.targets.some((t) => normalizeTitle(t) === normGuess)) {
+		if (guessedYear === null && resolved.targets.some((t) => normalizeTitle(t) === normGuess)) {
 			guessedYear = secret.reveal.seasonYear;
 		}
 
-		if (guessedYear === null && resolved.lookup?.year) {
-			guessedYear = resolved.lookup.year;
+		if (guessedYear === null) {
+			const curatedHit = CURATED_GLOBAL_POOL.find(
+				(item) =>
+					normalizeTitle(item.titleRomaji) === normGuess ||
+					(item.titleEnglish && normalizeTitle(item.titleEnglish) === normGuess)
+			);
+			if (curatedHit?.seasonYear) guessedYear = curatedHit.seasonYear;
 		}
 
 		if (guessedYear === null && body.username) {
@@ -292,15 +357,6 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			} catch {
 				// ignore lookup failure
 			}
-		}
-
-		if (guessedYear === null) {
-			const curatedHit = CURATED_GLOBAL_POOL.find(
-				(item) =>
-					normalizeTitle(item.titleRomaji) === normGuess ||
-					(item.titleEnglish && normalizeTitle(item.titleEnglish) === normGuess)
-			);
-			if (curatedHit?.seasonYear) guessedYear = curatedHit.seasonYear;
 		}
 
 		if (guessedYear === null && resolved.lookup === undefined) {

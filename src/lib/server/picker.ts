@@ -294,8 +294,16 @@ export async function pickRoundFromPool(params: {
 			const eligibleEps = filterWatchedEpisodes(anizip.episodes, show.progress, isCompleted);
 			if (eligibleEps.length === 0) continue;
 
-			const epIndex = Math.floor(rng() * eligibleEps.length);
-			const picked = eligibleEps[epIndex];
+			// In Daily mode, prefer modern TVDB v4 HD screencaps (/banners/v4/episode/) over legacy 400x225 stills
+			// so zoomed-in Daily crops stay crisp.
+			const hdEps =
+				mode === 'daily'
+					? eligibleEps.filter((ep) => ep.image.includes('/banners/v4/'))
+					: eligibleEps;
+			const pickPool = hdEps.length > 0 ? hdEps : eligibleEps;
+
+			const epIndex = Math.floor(rng() * pickPool.length);
+			const picked = pickPool[epIndex];
 
 			const originX = Math.round(34 + rng() * 32);
 			const originY = Math.round(34 + rng() * 32);

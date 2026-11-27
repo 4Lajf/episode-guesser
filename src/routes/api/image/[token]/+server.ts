@@ -122,7 +122,9 @@ async function applyServerCrop(buffer: Buffer, crop: CropSpec): Promise<Buffer> 
 	const h = meta.height ?? 0;
 	if (w < 64 || h < 64) return buffer;
 
-	const scale = Math.min(4, Math.max(1.01, crop.scale));
+	const rawScale = Math.min(4, Math.max(1.01, crop.scale));
+	// Cap effective zoom on legacy SD stills (<= 420px wide) so crops stay readable
+	const scale = w <= 420 ? Math.min(rawScale, 1.75) : rawScale;
 	const cropW = Math.max(32, Math.round(w / scale));
 	const cropH = Math.max(18, Math.round(h / scale));
 

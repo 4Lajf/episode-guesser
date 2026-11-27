@@ -26,6 +26,7 @@ COPY --from=builder --chown=node:node /app/package.json ./package.json
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 
 RUN mkdir -p /app/.cache && chown -R node:node /app/.cache
+VOLUME ["/app/.cache"]
 
 USER node
 
