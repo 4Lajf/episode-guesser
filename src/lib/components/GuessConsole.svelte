@@ -56,14 +56,24 @@
 	const isLockedAnime = $derived(Boolean(lockedAnimeTitle));
 
 	const indexedEntries = $derived(
-		entries.map((entry) => ({
-			entry,
-			tLower: entry.t.toLowerCase(),
-			tNorm: normalizeTitle(entry.t),
-			aLower: entry.a ? entry.a.toLowerCase() : '',
-			aNorm: entry.a ? normalizeTitle(entry.a) : '',
-			sNorms: entry.s ? entry.s.map((x) => normalizeTitle(x)).filter(Boolean) : []
-		}))
+		entries.map((entry) => {
+			const aliases: Array<{ raw: string; lower: string; norm: string }> = [];
+			if (entry.a) {
+				aliases.push({ raw: entry.a, lower: entry.a.toLowerCase(), norm: normalizeTitle(entry.a) });
+			}
+			if (entry.s) {
+				for (const raw of entry.s) {
+					const norm = normalizeTitle(raw);
+					if (norm) aliases.push({ raw, lower: raw.toLowerCase(), norm });
+				}
+			}
+			return {
+				entry,
+				tLower: entry.t.toLowerCase(),
+				tNorm: normalizeTitle(entry.t),
+				aliases
+			};
+		})
 	);
 
 	// Shows episode count strictly for the show the player typed/picked (global catalog only — never leaks target).
@@ -77,8 +87,7 @@
 			if (
 				item.tLower === lower ||
 				(norm && item.tNorm === norm) ||
-				(item.aLower && item.aLower === lower) ||
-				(norm && item.aNorm === norm)
+				item.aliases.some((a) => a.lower === lower || (norm && a.norm === norm))
 			) {
 				return item.entry.ep && item.entry.ep > 0 ? item.entry.ep : null;
 			}
@@ -149,88 +158,80 @@
 		return prev === ' ' || prev === ':' || prev === '-' || prev === '/' || prev === '(';
 	}
 
+	interface RankedOption {
+		entry: AutocompleteEntry;
+		/** Shown as a subtle subtitle ONLY when the player's query matched an alternate title (e.g. English) rather than entry.t */
+		matchedAlias?: string;
+	}
+
 	const searchResult = $derived.by(() => {
 		const rawQ = titleQuery.trim().toLowerCase();
 		const normQ = normalizeTitle(titleQuery);
-		if (!rawQ && !normQ) return { items: [] as AutocompleteEntry[], total: 0 };
+		if (!rawQ && !normQ) return { items: [] as RankedOption[], total: 0 };
 
-		const buckets: AutocompleteEntry[][] = [[], [], [], [], [], [], []];
+		const buckets: RankedOption[][] = [[], [], [], [], [], [], []];
 
 		for (let i = 0; i < indexedEntries.length; i++) {
 			const item = indexedEntries[i];
 			const tRawIdx = rawQ ? item.tLower.indexOf(rawQ) : -1;
 			const tNormIdx = normQ ? item.tNorm.indexOf(normQ) : -1;
-			const aRawIdx = rawQ && item.aLower ? item.aLower.indexOf(rawQ) : -1;
-			const aNormIdx = normQ && item.aNorm ? item.aNorm.indexOf(normQ) : -1;
+			const primaryMatched = tRawIdx !== -1 || tNormIdx !== -1;
 
-			let sExactOrPrefix = false;
-			let sContains = false;
-			if (normQ && item.sNorms.length > 0 && tRawIdx === -1 && tNormIdx === -1 && aRawIdx === -1 && aNormIdx === -1) {
-				for (let j = 0; j < item.sNorms.length; j++) {
-					const s = item.sNorms[j];
-					if (s === normQ || s.startsWith(normQ)) {
-						sExactOrPrefix = true;
-						break;
-					}
-					if (s.includes(normQ)) {
-						sContains = true;
-					}
+			// Find best matching alternate title (English / nickname)
+			let bestAliasTier = 99;
+			let bestAliasRaw: string | undefined;
+			for (let j = 0; j < item.aliases.length; j++) {
+				const al = item.aliases[j];
+				const aRawIdx = rawQ ? al.lower.indexOf(rawQ) : -1;
+				const aNormIdx = normQ ? al.norm.indexOf(normQ) : -1;
+				if (aRawIdx === -1 && aNormIdx === -1) continue;
+				let tier = 6;
+				if ((rawQ && al.lower === rawQ) || (normQ && al.norm === normQ)) {
+					tier = 1;
+				} else if (aRawIdx === 0 || aNormIdx === 0) {
+					tier = 4;
+				} else if (isWordStart(al.lower, aRawIdx) || isWordStart(al.norm, aNormIdx)) {
+					tier = 5;
+				}
+				if (tier < bestAliasTier) {
+					bestAliasTier = tier;
+					bestAliasRaw = al.raw;
+					if (tier === 1) break;
 				}
 			}
 
-			if (
-				tRawIdx === -1 &&
-				tNormIdx === -1 &&
-				aRawIdx === -1 &&
-				aNormIdx === -1 &&
-				!sExactOrPrefix &&
-				!sContains
-			) {
-				continue;
+			if (!primaryMatched && bestAliasTier === 99) continue;
+
+			// Compute best tier from primary display title
+			let primaryTier = 99;
+			if (rawQ && item.tLower === rawQ) {
+				primaryTier = 0;
+			} else if (normQ && item.tNorm === normQ) {
+				primaryTier = 1;
+			} else if (tRawIdx === 0) {
+				primaryTier = 2;
+			} else if (tNormIdx === 0) {
+				primaryTier = 3;
+			} else if (isWordStart(item.tLower, tRawIdx) || isWordStart(item.tNorm, tNormIdx)) {
+				primaryTier = 5;
+			} else if (primaryMatched) {
+				primaryTier = 6;
 			}
 
-			// Tier 0: exact raw display match (e.g. "Hunter x Hunter (2011)" always #1)
-			if (rawQ && item.tLower === rawQ) {
-				buckets[0].push(item.entry);
-			} else if (
-				(normQ && item.tNorm === normQ) ||
-				(rawQ && item.aLower === rawQ) ||
-				(normQ && item.aNorm === normQ)
-			) {
-				// Tier 1: exact normalized display or exact English alias
-				buckets[1].push(item.entry);
-			} else if (tRawIdx === 0) {
-				// Tier 2: display raw prefix
-				buckets[2].push(item.entry);
-			} else if (tNormIdx === 0) {
-				// Tier 3: display normalized prefix
-				buckets[3].push(item.entry);
-			} else if (aRawIdx === 0 || aNormIdx === 0) {
-				// Tier 4: English alias prefix
-				buckets[4].push(item.entry);
-			} else if (
-				isWordStart(item.tLower, tRawIdx) ||
-				isWordStart(item.tNorm, tNormIdx) ||
-				isWordStart(item.aLower, aRawIdx) ||
-				isWordStart(item.aNorm, aNormIdx) ||
-				sExactOrPrefix
-			) {
-				// Tier 5: word-start or nickname prefix
-				buckets[5].push(item.entry);
-			} else {
-				// Tier 6: substring match
-				buckets[6].push(item.entry);
-			}
+			const finalTier = Math.min(primaryTier, bestAliasTier);
+			// Only show the matched alias line when the player matched via an alternate title (e.g. "Attack on Titan" -> Shingeki no Kyojin)
+			const showAlias = !primaryMatched || bestAliasTier < primaryTier ? bestAliasRaw : undefined;
+			buckets[finalTier].push({ entry: item.entry, matchedAlias: showAlias });
 		}
 
 		for (let b = 0; b < buckets.length; b++) {
 			if (buckets[b].length > 1) {
-				buckets[b].sort((a, c) => a.t.length - c.t.length || a.t.localeCompare(c.t));
+				buckets[b].sort((a, c) => a.entry.t.length - c.entry.t.length || a.entry.t.localeCompare(c.entry.t));
 			}
 		}
 
 		let total = 0;
-		const items: AutocompleteEntry[] = [];
+		const items: RankedOption[] = [];
 		for (let b = 0; b < buckets.length; b++) {
 			total += buckets[b].length;
 			if (items.length < 8) {
@@ -304,7 +305,7 @@
 		} else if (e.key === 'Enter') {
 			if (dropdownOpen && filteredEntries.length > 0) {
 				e.preventDefault();
-				selectEntry(filteredEntries[activeIndex] ?? filteredEntries[0]);
+				selectEntry((filteredEntries[activeIndex] ?? filteredEntries[0]).entry);
 			} else if (titleQuery.trim()) {
 				e.preventDefault();
 				episodeInputEl?.focus();
@@ -501,8 +502,8 @@
 							role="listbox"
 							aria-label="Matching titles"
 						>
-							{#each filteredEntries as item, idx (item.t)}
-								{@const [before, match, after] = splitHighlight(item.t, titleQuery)}
+							{#each filteredEntries as opt, idx (opt.entry.t)}
+								{@const [before, match, after] = splitHighlight(opt.entry.t, titleQuery)}
 								<button
 									type="button"
 									tabindex="-1"
@@ -511,14 +512,14 @@
 									aria-selected={idx === activeIndex}
 									class="match-opt"
 									onmousedown={(e) => e.preventDefault()}
-									onclick={() => selectEntry(item)}
+									onclick={() => selectEntry(opt.entry)}
 									onmouseenter={() => (activeIndex = idx)}
 								>
 									<span class="t">
 										{before}{#if match}<mark>{match}</mark>{/if}{after}
 									</span>
-									{#if item.a}
-										{@const [aBefore, aMatch, aAfter] = splitHighlight(item.a, titleQuery)}
+									{#if opt.matchedAlias}
+										{@const [aBefore, aMatch, aAfter] = splitHighlight(opt.matchedAlias, titleQuery)}
 										<span class="sub">
 											{aBefore}{#if aMatch}<mark>{aMatch}</mark>{/if}{aAfter}
 										</span>

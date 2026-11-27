@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { CURATED_GLOBAL_POOL } from '$lib/curated';
-import { dropdownDedupeKey, normalizeTitle } from '$lib/scoring';
+import { normalizeTitle } from '$lib/scoring';
 import type { AutocompleteEntry } from '$lib/types';
 import { getCachedAnisongDbTitles } from './anisongdb';
 
@@ -12,7 +12,7 @@ const OFFLINE_DB_URL =
 	'https://github.com/manami-project/anime-offline-database/releases/latest/download/anime-offline-database-minified.json';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const FAILURE_BACKOFF_MS = 10 * 60 * 1000; // 10 minutes
-const CACHE_FILE = join(process.cwd(), '.cache', 'anime-catalog-v2.json');
+const CACHE_FILE = join(process.cwd(), '.cache', 'anime-catalog-v3.json');
 
 const ANILIST_URL_RE = /^https?:\/\/anilist\.co\/anime\/(\d+)/i;
 const LATIN_TITLE_RE = /^[\u0020-\u007E\u00A0-\u024F\u2018-\u201F\u00D7\u2606\u3010\u3011√]+$/;
@@ -47,7 +47,7 @@ export interface CatalogMatch {
 type CompactCatalogRow = [number, number | null, number[], string[]];
 
 interface PersistedCatalog {
-	v: 2;
+	v: 3;
 	fetchedAt: number;
 	entries: AutocompleteEntry[];
 	rows: CompactCatalogRow[];
@@ -82,7 +82,7 @@ function readDiskCatalog(): PersistedCatalog | null {
 		if (!existsSync(CACHE_FILE)) return null;
 		const parsed = JSON.parse(readFileSync(CACHE_FILE, 'utf8')) as PersistedCatalog;
 		if (
-			parsed?.v === 2 &&
+			parsed?.v === 3 &&
 			Array.isArray(parsed.entries) &&
 			parsed.entries.length > 0 &&
 			Array.isArray(parsed.rows) &&
@@ -115,14 +115,13 @@ async function writeDiskCatalog(entry: PersistedCatalog): Promise<void> {
 	}
 }
 
-function isCleanEnglishAlias(syn: string, primaryNorm: string): boolean {
-	if (syn.length < 4 || syn.length > 85) return false;
+function isCleanSearchAlias(syn: string, primaryNorm: string): boolean {
+	if (syn.length < 3 || syn.length > 85) return false;
 	if (!LATIN_TITLE_RE.test(syn)) return false;
-	// Reject all-lowercase junk (e.g. "violet") or short acronyms ("AoT", "SAO")
-	if (syn === syn.toLowerCase() && /[a-z]/.test(syn)) return false;
-	if (/^[A-Z0-9]{2,5}$/.test(syn)) return false;
 	if (JUNK_TITLE_RE.test(syn)) return false;
 	if (FOREIGN_SYNONYM_RE.test(syn)) return false;
+	// Reject noisy single lowercase words like "violet"
+	if (syn === syn.toLowerCase() && !syn.includes(' ') && syn.length < 10) return false;
 	const norm = normalizeTitle(syn);
 	if (!norm || norm === primaryNorm) return false;
 	return true;
@@ -206,49 +205,38 @@ function distillOfflineDatabase(rawEntries: RawOfflineEntry[]): PersistedCatalog
 		}
 
 		if (!primary || entryByAnilistId.has(alId)) continue;
-		const dk = dropdownDedupeKey(primary);
+		// Preserve distinct year-disambiguated remakes (e.g. "Hunter x Hunter" vs "Hunter x Hunter (2011)")
+		const dk = primary.toLowerCase().replace(/\s+/g, ' ').trim();
 		if (!dk || seenDropdownKeys.has(dk)) continue;
 		seenDropdownKeys.add(dk);
 
-		// Pick at most ONE clean English/alternate display alias per show
-		let altTitle: string | undefined;
-		if (
-			curated?.titleEnglish &&
-			normalizeTitle(curated.titleEnglish) !== normPrimary
-		) {
-			altTitle = curated.titleEnglish;
-		} else {
-			for (const rawSyn of entry.synonyms ?? []) {
-				const syn = rawSyn?.trim();
-				if (syn && isCleanEnglishAlias(syn, normPrimary)) {
-					altTitle = syn;
-					break;
-				}
-			}
-		}
+		// Collect up to 6 clean Latin search aliases (English titles + nicknames) uniformly across
+		// ALL shows so searching English titles works everywhere without leaking pool membership.
+		const extraSearchAliases: string[] = [];
+		const seenAliasNorm = new Set<string>([normPrimary]);
+		const rawCandidates: string[] = [];
+		if (curated?.titleEnglish) rawCandidates.push(curated.titleEnglish);
+		if (curated?.synonyms) rawCandidates.push(...curated.synonyms);
+		if (entry.synonyms) rawCandidates.push(...entry.synonyms);
 
-		// Collect up to 3 clean search-only aliases (nicknames like "danmachi", "konosuba", "fma")
-		const extraSearchAliases = new Set<string>();
-		for (const rawSyn of [...(curated?.synonyms ?? []), ...(entry.synonyms ?? [])]) {
+		for (const rawSyn of rawCandidates) {
 			const syn = rawSyn?.trim();
-			if (!syn || syn.length < 3 || syn.length > 60) continue;
-			if (!LATIN_TITLE_RE.test(syn) || FOREIGN_SYNONYM_RE.test(syn) || JUNK_TITLE_RE.test(syn)) {
-				continue;
-			}
+			if (!syn || !isCleanSearchAlias(syn, normPrimary)) continue;
 			const n = normalizeTitle(syn);
-			if (n && n !== normPrimary && n !== (altTitle ? normalizeTitle(altTitle) : '')) {
-				extraSearchAliases.add(syn);
-				if (extraSearchAliases.size >= 3) break;
-			}
+			if (!n || seenAliasNorm.has(n)) continue;
+			seenAliasNorm.add(n);
+			extraSearchAliases.push(syn);
+			if (extraSearchAliases.length >= 6) break;
 		}
 
-		const epCount = curated?.episodes ?? (typeof entry.episodes === 'number' && entry.episodes > 0 ? entry.episodes : undefined);
+		const epCount =
+			curated?.episodes ??
+			(typeof entry.episodes === 'number' && entry.episodes > 0 ? entry.episodes : undefined);
 
 		entryByAnilistId.set(alId, {
 			t: primary,
-			...(altTitle ? { a: altTitle } : {}),
 			...(epCount ? { ep: epCount } : {}),
-			...(extraSearchAliases.size > 0 ? { s: Array.from(extraSearchAliases) } : {})
+			...(extraSearchAliases.length > 0 ? { s: extraSearchAliases } : {})
 		});
 	}
 
@@ -256,14 +244,14 @@ function distillOfflineDatabase(rawEntries: RawOfflineEntry[]): PersistedCatalog
 	for (const item of CURATED_GLOBAL_POOL) {
 		if (entryByAnilistId.has(item.id)) continue;
 		const normPrimary = normalizeTitle(item.titleRomaji);
-		const alt =
-			item.titleEnglish && normalizeTitle(item.titleEnglish) !== normPrimary
-				? item.titleEnglish
-				: undefined;
+		const aliases: string[] = [];
+		if (item.titleEnglish && normalizeTitle(item.titleEnglish) !== normPrimary) {
+			aliases.push(item.titleEnglish);
+		}
 		entryByAnilistId.set(item.id, {
 			t: item.titleRomaji,
-			...(alt ? { a: alt } : {}),
-			...(item.episodes ? { ep: item.episodes } : {})
+			...(item.episodes ? { ep: item.episodes } : {}),
+			...(aliases.length > 0 ? { s: aliases } : {})
 		});
 	}
 
@@ -272,7 +260,7 @@ function distillOfflineDatabase(rawEntries: RawOfflineEntry[]): PersistedCatalog
 	);
 
 	return {
-		v: 2,
+		v: 3,
 		fetchedAt: Date.now(),
 		entries,
 		rows
@@ -365,22 +353,25 @@ export async function getGlobalAutocompleteCatalog(): Promise<{
 	const byKey = new Map<string, AutocompleteEntry>();
 
 	for (const item of CURATED_GLOBAL_POOL) {
-		const k = dropdownDedupeKey(item.titleRomaji);
+		const k = item.titleRomaji.toLowerCase().replace(/\s+/g, ' ').trim();
 		if (!k || byKey.has(k)) continue;
-		const alt =
-			item.titleEnglish && normalizeTitle(item.titleEnglish) !== normalizeTitle(item.titleRomaji)
-				? item.titleEnglish
-				: undefined;
+		const aliases: string[] = [];
+		if (
+			item.titleEnglish &&
+			normalizeTitle(item.titleEnglish) !== normalizeTitle(item.titleRomaji)
+		) {
+			aliases.push(item.titleEnglish);
+		}
 		byKey.set(k, {
 			t: item.titleRomaji,
-			...(alt ? { a: alt } : {}),
-			...(item.episodes ? { ep: item.episodes } : {})
+			...(item.episodes ? { ep: item.episodes } : {}),
+			...(aliases.length > 0 ? { s: aliases } : {})
 		});
 	}
 
 	for (const raw of anisong.titles) {
 		if (JUNK_TITLE_RE.test(raw)) continue;
-		const k = dropdownDedupeKey(raw);
+		const k = raw.toLowerCase().replace(/\s+/g, ' ').trim();
 		if (k && !byKey.has(k)) byKey.set(k, { t: raw });
 	}
 
