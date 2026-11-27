@@ -10,7 +10,7 @@ import { unsealPayload } from '$lib/server/token';
 import type { RequestHandler } from './$types';
 
 const MAX_REDIRECTS = 2;
-const MAX_CACHE_ENTRIES = 48;
+const MAX_CACHE_ENTRIES = 64;
 
 interface CachedImageResponse {
 	bytes: Uint8Array;
@@ -18,14 +18,21 @@ interface CachedImageResponse {
 	expiresAt: number;
 }
 
+// Keyed by canonical upstream URL + crop parameters (not per-player token) so all players
+// share cached Global Daily & common episode frames without re-fetching from TVDB.
 const renderedCache = new Map<string, CachedImageResponse>();
 
-function putRenderedCache(token: string, entry: CachedImageResponse): void {
+function makeCacheKey(url: string, crop?: CropSpec): string {
+	if (!crop || crop.scale <= 1.01) return `${url}|full`;
+	return `${url}|${crop.scale.toFixed(2)}|${Math.round(crop.originX)}|${Math.round(crop.originY)}`;
+}
+
+function putRenderedCache(key: string, entry: CachedImageResponse): void {
 	if (renderedCache.size >= MAX_CACHE_ENTRIES) {
 		const first = renderedCache.keys().next().value;
 		if (first) renderedCache.delete(first);
 	}
-	renderedCache.set(token, entry);
+	renderedCache.set(key, entry);
 }
 
 async function fetchAllowlistedImage(
@@ -125,14 +132,31 @@ async function applyServerCrop(buffer: Buffer, crop: CropSpec): Promise<Buffer> 
 	const left = Math.min(Math.max(0, centerX - Math.round(cropW / 2)), w - cropW);
 	const top = Math.min(Math.max(0, centerY - Math.round(cropH / 2)), h - cropH);
 
-	return image
-		.extract({ left, top, width: cropW, height: cropH })
-		.jpeg({ quality: 88, mozjpeg: true })
-		.toBuffer();
+	let pipeline = image.extract({ left, top, width: cropW, height: cropH });
+
+	// Upscale tight Daily crops cleanly with Lanczos3 + light sharpening so low-res sources
+	// don't render as blurry 182x102 patches on 944px desktop viewports
+	if (cropW < 960) {
+		pipeline = pipeline
+			.resize({ width: 960, kernel: 'lanczos3', withoutEnlargement: false })
+			.sharpen({ sigma: 0.6 });
+	}
+
+	return pipeline.jpeg({ quality: 90, mozjpeg: true }).toBuffer();
 }
 
 export const GET: RequestHandler = async ({ params }) => {
-	const cached = renderedCache.get(params.token);
+	const secret = unsealPayload<SealedImageSecret>(params.token);
+	if (!secret || secret.typ !== 'image' || !secret.url || secret.exp < Date.now()) {
+		throw error(404, 'Image token expired or invalid');
+	}
+
+	if (!isAllowedImageUrl(secret.url)) {
+		throw error(403, 'Disallowed upstream image host');
+	}
+
+	const cacheKey = makeCacheKey(secret.url, secret.crop);
+	const cached = renderedCache.get(cacheKey);
 	if (cached && cached.expiresAt > Date.now()) {
 		return new Response(new Uint8Array(cached.bytes), {
 			status: 200,
@@ -142,15 +166,6 @@ export const GET: RequestHandler = async ({ params }) => {
 				'x-content-type-options': 'nosniff'
 			}
 		});
-	}
-
-	const secret = unsealPayload<SealedImageSecret>(params.token);
-	if (!secret || secret.typ !== 'image' || !secret.url || secret.exp < Date.now()) {
-		throw error(404, 'Image token expired or invalid');
-	}
-
-	if (!isAllowedImageUrl(secret.url)) {
-		throw error(403, 'Disallowed upstream image host');
 	}
 
 	const controller = new AbortController();
@@ -173,7 +188,7 @@ export const GET: RequestHandler = async ({ params }) => {
 
 		const bytes = new Uint8Array(outBuffer);
 		if (bytes.byteLength <= 1_500_000) {
-			putRenderedCache(params.token, {
+			putRenderedCache(cacheKey, {
 				bytes,
 				mime: outMime,
 				expiresAt: Math.min(secret.exp, Date.now() + 60 * 60 * 1000)

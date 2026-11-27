@@ -38,6 +38,24 @@ export function normalizeTitle(raw: string): string {
 }
 
 /**
+ * Extracts a canonical franchise root from a title by stripping colon-separated subtitles
+ * and trailing sequel/season/part/roman-numeral indicators so symmetric franchise matching
+ * works both ways ("Overlord" <-> "Overlord III", "Bleach" <-> "Bleach: Thousand-Year Blood War",
+ * "Dr. Stone" <-> "Dr. STONE: SCIENCE FUTURE Part 3") without matching truncated partial words
+ * like "Mushoku" against "Mushoku Tensei: Isekai Ittara Honki Dasu".
+ */
+const SEQUEL_SUFFIX_RE =
+	/(?:\s+(?:the\s+final(?:\s+season)?|final\s+season|season\s*\d+|\d+(?:st|nd|rd|th)\s+season|part\s*\d+|cour\s*\d+|shippuden|brotherhood|zero|movie|ova|specials?|ii|iii|iv|v|vi|vii|s\d+|\d+))+$/i;
+
+function extractFranchiseRoot(raw: string): string {
+	const colonIdx = raw.indexOf(':');
+	const beforeColon = colonIdx >= 4 ? raw.slice(0, colonIdx) : raw;
+	const normBase = normalizeTitle(beforeColon);
+	const stripped = normBase.replace(SEQUEL_SUFFIX_RE, '').trim();
+	return stripped.length >= 5 ? stripped : normBase;
+}
+
+/**
  * Deduplication key for dropdown titles that preserves trailing "(YYYY)" release years
  * so remakes like "Hunter x Hunter (2011)" and "Fruits Basket (2019)" stay distinct.
  */
@@ -61,9 +79,18 @@ export function matchAnimeTitle(
 	const normFranchise = new Set(franchiseTitles.map(normalizeTitle).filter(Boolean));
 	if (normFranchise.has(normGuess)) return 'franchise';
 
-	// Prefix fallback for same-franchise season subtitles (e.g. "Steins;Gate 0" vs "Steins;Gate",
-	// "Dr. Stone" vs "Dr. STONE: SCIENCE FUTURE Part 3"), requiring the full target title or a
-	// multi-word prefix (>= 6 chars) so single truncated words like "Mushoku" never score.
+	// Symmetric franchise root match (e.g. "Overlord" <-> "Overlord III", "Bleach" <-> "Bleach: ...")
+	const guessRoot = extractFranchiseRoot(guess);
+	if (guessRoot.length >= 5) {
+		for (const rawTarget of targetTitles) {
+			const targetRoot = extractFranchiseRoot(rawTarget);
+			if (targetRoot.length >= 5 && targetRoot === guessRoot) {
+				return 'franchise';
+			}
+		}
+	}
+
+	// Prefix fallback for same-franchise season subtitles (requiring full target title or multi-word >= 6 chars)
 	if (normGuess.length >= 5) {
 		for (const t of normTargets) {
 			if (

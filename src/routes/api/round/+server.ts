@@ -8,7 +8,7 @@ import {
 	WORDLE_ZOOM_STEPS
 } from '$lib/scoring';
 import { fetchAniListProfile, sanitizeStatuses } from '$lib/server/anilist';
-import { getDailyRecord, saveDailyRecord } from '$lib/server/dailyStore';
+import { getDailyRecord } from '$lib/server/dailyStore';
 import { pickRoundFromPool } from '$lib/server/picker';
 import type { GameMode, ListStatus, RoundPayload } from '$lib/types';
 import type { RequestHandler } from './$types';
@@ -73,7 +73,9 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 
 		const todayUtc = getTodayUtcDate();
 
-		// Server-enforced Daily session: return existing in-progress/completed record instead of minting a fresh reset
+		// Server-enforced Daily session: restore existing in-progress/completed record instead of minting a fresh reset.
+		// Zero-attempt sessions are NOT persisted until the player submits their first guess, preventing
+		// anonymous/cookie-less traffic from filling daily-store.json.
 		if (mode === 'daily') {
 			const existing = getDailyRecord(playerId, todayUtc, scopeKey);
 			if (existing) {
@@ -117,22 +119,6 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 					}
 				: {})
 		});
-
-		if (mode === 'daily' && picked.dailyStateToken) {
-			saveDailyRecord(playerId, {
-				date: todayUtc,
-				scopeKey,
-				roundId: picked.roundId,
-				roundToken: picked.roundToken,
-				dailyStateToken: picked.dailyStateToken,
-				currentImageUrl: picked.imageUrl,
-				attempts: [],
-				usedKeys: [],
-				finished: false,
-				won: false,
-				updatedAt: Date.now()
-			});
-		}
 
 		const payload: RoundPayload = {
 			roundToken: picked.roundToken,

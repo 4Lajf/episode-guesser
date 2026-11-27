@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import ClassicSummary from '$lib/components/ClassicSummary.svelte';
 	import DailyBoard from '$lib/components/DailyBoard.svelte';
@@ -10,9 +10,11 @@
 	import PlayerSetupModal from '$lib/components/PlayerSetupModal.svelte';
 	import RoundReveal from '$lib/components/RoundReveal.svelte';
 	import SessionBar from '$lib/components/SessionBar.svelte';
+	import { CURATED_GLOBAL_POOL } from '$lib/curated';
 	import {
 		CLASSIC_ROUNDS,
 		dropdownDedupeKey,
+		getTodayUtcDate,
 		normalizeTitle,
 		WORDLE_ZOOM_STEPS
 	} from '$lib/scoring';
@@ -42,14 +44,15 @@
 	const STORAGE_RECENT_KEY = 'eg:recent-users:v1';
 	const STORAGE_BEST_STREAK_KEY = 'eg:best-streak:v1';
 	const STORAGE_DAILY_SCOPE_KEY = 'eg:daily-global:v1';
+	const STORAGE_DAILY_DONE_KEY = 'eg:daily-done:v1';
 
 	let anisongDbTitles = $state<string[]>([]);
 
 	let profile = $state<PublicProfile>({
 		username: 'Global Pool',
 		avatar: null,
-		totalEntries: 32,
-		eligibleShows: 32,
+		totalEntries: CURATED_GLOBAL_POOL.length,
+		eligibleShows: CURATED_GLOBAL_POOL.length,
 		isGlobalPool: true,
 		statuses: ['COMPLETED', 'CURRENT'],
 		includeSingleEp: false,
@@ -60,9 +63,15 @@
 	let setupLoading = $state(false);
 	let setupError = $state<string | null>(null);
 	let recentUsers = $state<string[]>([]);
+	let nudgeDismissed = $state(false);
+	let failedSavedUser = $state<{
+		username: string;
+		statuses: ListStatus[];
+		includeSingleEp: boolean;
+		reason: string;
+	} | null>(null);
 
 	let mode = $state<GameMode>('classic');
-	let currentRound = $state<RoundPayload | null>(null);
 	let roundLoading = $state(false);
 	let roundError = $state<string | null>(null);
 	let guessInlineError = $state<string | null>(null);
@@ -70,28 +79,31 @@
 	let lightboxOpen = $state(false);
 	let lightboxImage = $state<string | null>(null);
 	let roundCounter = $state(0);
+	let srAnnouncement = $state('');
 
 	// Race protection across rapid mode / scope switches
 	let roundRequestSeq = 0;
 	let activeRoundAbort: AbortController | null = null;
 
-	// Classic mode state
+	// Per-mode preserved rounds & reveals so switching tabs NEVER wipes an active run!
+	let classicRound = $state<RoundPayload | null>(null);
+	let classicReveal = $state<ClassicGuessResponse | null>(null);
 	let classicRoundIndex = $state(0);
 	let classicHistory = $state<CompletedClassicRound[]>([]);
 	let classicScore = $state(0);
+	let classicStreak = $state(0);
 	let classicFinished = $state(false);
+	let classicSeenIds = $state<number[]>([]);
 
-	// Unlimited mode state
+	let unlimitedRound = $state<RoundPayload | null>(null);
+	let unlimitedReveal = $state<ClassicGuessResponse | null>(null);
 	let unlimitedCount = $state(0);
 	let unlimitedScore = $state(0);
-	let streak = $state(0);
+	let unlimitedStreak = $state(0);
 	let bestStreak = $state(0);
+	let unlimitedSeenIds = $state<number[]>([]);
 
-	// Shared Classic/Unlimited reveal (renders inside right rail while frame stays pinned!)
-	let activeReveal = $state<ClassicGuessResponse | null>(null);
-	let seenMediaIds = $state<number[]>([]);
-
-	// Daily Frame-Wordle state
+	let dailyRound = $state<RoundPayload | null>(null);
 	let dailyUseGlobal = $state(false);
 	let dailyStateToken = $state<string | null>(null);
 	let dailyAttempts = $state<WordleAttemptFeedback[]>([]);
@@ -99,6 +111,17 @@
 	let dailyWon = $state(false);
 	let dailyReveal = $state<EpisodeReveal | null>(null);
 	let dailyLiveEpisode = $state(1);
+	let dailyCompletedHint = $state(false);
+
+	const currentRound = $derived(
+		mode === 'classic' ? classicRound : mode === 'unlimited' ? unlimitedRound : dailyRound
+	);
+
+	const activeReveal = $derived(
+		mode === 'classic' ? classicReveal : mode === 'unlimited' ? unlimitedReveal : null
+	);
+
+	const activeStreak = $derived(mode === 'classic' ? classicStreak : unlimitedStreak);
 
 	const dropdownTitles = $derived.by(() => {
 		const byKey = new Map<string, string>();
@@ -115,6 +138,41 @@
 		);
 	});
 
+	const dailyScopeHintKey = $derived.by(() => {
+		const today = getTodayUtcDate();
+		const useGlobal = profile.isGlobalPool || dailyUseGlobal;
+		if (useGlobal) return `${today}|global`;
+		return `${today}|user:${profile.username.toLowerCase()}:${profile.statuses.slice().sort().join(',')}:${profile.includeSingleEp ? '1' : '0'}`;
+	});
+
+	function readDailyDoneHint(key: string): boolean {
+		try {
+			const raw = localStorage.getItem(STORAGE_DAILY_DONE_KEY);
+			if (!raw) return false;
+			const parsed = JSON.parse(raw) as Record<string, boolean>;
+			return Boolean(parsed[key]);
+		} catch {
+			return false;
+		}
+	}
+
+	function writeDailyDoneHint(key: string, done: boolean) {
+		dailyCompletedHint = done;
+		try {
+			const raw = localStorage.getItem(STORAGE_DAILY_DONE_KEY);
+			const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+			const todayPrefix = `${getTodayUtcDate()}|`;
+			const next: Record<string, boolean> = {};
+			for (const [k, v] of Object.entries(parsed)) {
+				if (k.startsWith(todayPrefix) && v) next[k] = true;
+			}
+			if (done) next[key] = true;
+			localStorage.setItem(STORAGE_DAILY_DONE_KEY, JSON.stringify(next));
+		} catch {
+			// ignore
+		}
+	}
+
 	const dailyActiveStepIndex = $derived(
 		dailyFinished
 			? WORDLE_ZOOM_STEPS.length - 1
@@ -128,7 +186,6 @@
 		return dailyAttempts.find((a) => a.animeStatus === 'hit') ?? null;
 	});
 
-	// Derive tightest known episode bounds from all directional hints (only on attempts with valid episodeDirection)
 	const dailyEpisodeBounds = $derived.by(() => {
 		let minEp = 1;
 		let maxEp: number | null = null;
@@ -145,8 +202,7 @@
 			minEp = 1;
 			maxEp = null;
 		}
-		const suggested =
-			maxEp !== null ? Math.round((minEp + maxEp) / 2) : Math.max(1, minEp);
+		const suggested = maxEp !== null ? Math.round((minEp + maxEp) / 2) : Math.max(1, minEp);
 		let hint = '';
 		if (dailyMatchedAttempt) {
 			if (minEp > 1 && maxEp !== null) {
@@ -188,6 +244,12 @@
 		window.history.replaceState({}, '', url.toString());
 	}
 
+	function setRoundForMode(targetMode: GameMode, payload: RoundPayload | null) {
+		if (targetMode === 'classic') classicRound = payload;
+		else if (targetMode === 'unlimited') unlimitedRound = payload;
+		else dailyRound = payload;
+	}
+
 	function applyDailyStateFromPayload(payload: RoundPayload) {
 		if (payload.dailyRestore) {
 			dailyAttempts = payload.dailyRestore.attempts;
@@ -195,6 +257,7 @@
 			dailyWon = payload.dailyRestore.won;
 			dailyReveal = payload.dailyRestore.reveal ?? null;
 			dailyStateToken = payload.dailyStateToken ?? null;
+			writeDailyDoneHint(dailyScopeHintKey, payload.dailyRestore.finished);
 			return;
 		}
 
@@ -203,6 +266,7 @@
 		dailyWon = false;
 		dailyReveal = null;
 		dailyStateToken = payload.dailyStateToken ?? null;
+		writeDailyDoneHint(dailyScopeHintKey, false);
 	}
 
 	function saveRecentUser(name: string) {
@@ -231,12 +295,37 @@
 		}
 	}
 
+	function clearAllModeRuns() {
+		classicRound = null;
+		classicReveal = null;
+		classicRoundIndex = 0;
+		classicHistory = [];
+		classicScore = 0;
+		classicStreak = 0;
+		classicFinished = false;
+		classicSeenIds = [];
+
+		unlimitedRound = null;
+		unlimitedReveal = null;
+		unlimitedCount = 0;
+		unlimitedScore = 0;
+		unlimitedStreak = 0;
+		unlimitedSeenIds = [];
+
+		dailyRound = null;
+		dailyAttempts = [];
+		dailyFinished = false;
+		dailyWon = false;
+		dailyReveal = null;
+		dailyStateToken = null;
+	}
+
 	async function loadProfile(
 		username: string | null,
 		statuses: ListStatus[] = ['COMPLETED', 'CURRENT'],
 		includeSingleEp = false,
 		closeAfter = true,
-		openModalOnError = false
+		fallbackToGlobalOnError = false
 	): Promise<boolean> {
 		setupLoading = true;
 		setupError = null;
@@ -253,9 +342,17 @@
 			const res = await fetch(`/api/anilist?${params.toString()}`);
 			const data = await res.json();
 			if (!res.ok) {
-				setupError = data.error || 'Could not load that AniList profile.';
-				if (openModalOnError) setupOpen = true;
+				const errMsg = data.error || 'Could not load that AniList profile.';
+				setupError = errMsg;
+				if (fallbackToGlobalOnError && username) {
+					failedSavedUser = { username, statuses, includeSingleEp, reason: errMsg };
+					await loadProfile(null, ['COMPLETED', 'CURRENT'], false, true, false);
+				}
 				return false;
+			}
+
+			if (username) {
+				failedSavedUser = null;
 			}
 
 			profile = data as PublicProfile;
@@ -283,7 +380,7 @@
 				} catch {
 					// ignore
 				}
-			} else {
+			} else if (!failedSavedUser) {
 				try {
 					localStorage.removeItem(STORAGE_USER_KEY);
 				} catch {
@@ -291,12 +388,18 @@
 				}
 			}
 
+			dailyCompletedHint = readDailyDoneHint(dailyScopeHintKey);
 			if (closeAfter) setupOpen = false;
-			resetAndStartMode(mode);
+			clearAllModeRuns();
+			fetchRound(mode);
 			return true;
 		} catch {
-			setupError = 'Network error while reaching AniList.';
-			if (openModalOnError) setupOpen = true;
+			const errMsg = 'Network error while reaching AniList.';
+			setupError = errMsg;
+			if (fallbackToGlobalOnError && username) {
+				failedSavedUser = { username, statuses, includeSingleEp, reason: errMsg };
+				await loadProfile(null, ['COMPLETED', 'CURRENT'], false, true, false);
+			}
 			return false;
 		} finally {
 			setupLoading = false;
@@ -304,21 +407,28 @@
 		}
 	}
 
-	async function fetchRound(targetMode: GameMode) {
+	async function fetchRound(targetMode: GameMode, preserveError: string | null = null) {
 		const seq = ++roundRequestSeq;
 		activeRoundAbort?.abort();
 		const controller = new AbortController();
 		activeRoundAbort = controller;
 
 		roundLoading = true;
-		roundError = null;
+		roundError = preserveError;
 		guessInlineError = null;
-		activeReveal = null;
-		currentRound = null;
+		if (targetMode === 'classic') classicReveal = null;
+		else if (targetMode === 'unlimited') unlimitedReveal = null;
+		setRoundForMode(targetMode, null);
 
 		try {
 			const useGlobalPool =
 				profile.isGlobalPool || (targetMode === 'daily' && dailyUseGlobal);
+			const excludeMediaIds =
+				targetMode === 'classic'
+					? classicSeenIds
+					: targetMode === 'unlimited'
+						? unlimitedSeenIds
+						: [];
 
 			const res = await fetch('/api/round', {
 				method: 'POST',
@@ -329,7 +439,7 @@
 					useGlobalPool,
 					statuses: profile.statuses,
 					includeSingleEp: profile.includeSingleEp,
-					excludeMediaIds: targetMode === 'daily' ? [] : seenMediaIds
+					excludeMediaIds
 				}),
 				signal: controller.signal
 			});
@@ -340,12 +450,12 @@
 
 			if (!res.ok) {
 				roundError = data.error || 'Could not fetch an episode screencap.';
-				currentRound = null;
+				setRoundForMode(targetMode, null);
 				return;
 			}
 
 			const payload = data as RoundPayload;
-			currentRound = payload;
+			setRoundForMode(targetMode, payload);
 			roundCounter++;
 
 			if (targetMode === 'daily' && payload.dailyMeta) {
@@ -355,7 +465,7 @@
 			if (err instanceof Error && err.name === 'AbortError') return;
 			if (seq !== roundRequestSeq) return;
 			roundError = 'Network error while loading the next frame.';
-			currentRound = null;
+			setRoundForMode(targetMode, null);
 		} finally {
 			if (seq === roundRequestSeq) {
 				roundLoading = false;
@@ -363,35 +473,43 @@
 		}
 	}
 
-	function resetAndStartMode(nextMode: GameMode) {
+	function switchMode(nextMode: GameMode) {
+		if (nextMode === mode) {
+			if (!currentRound && !roundLoading && !(mode === 'classic' && classicFinished)) {
+				fetchRound(mode);
+			}
+			return;
+		}
 		mode = nextMode;
 		syncModeUrl(nextMode);
-		activeReveal = null;
 		roundError = null;
 		guessInlineError = null;
 		submitting = false;
 
-		if (nextMode === 'classic') {
-			classicRoundIndex = 0;
-			classicHistory = [];
-			classicScore = 0;
-			classicFinished = false;
-			streak = 0;
-			seenMediaIds = [];
-		} else if (nextMode === 'unlimited') {
-			unlimitedCount = 0;
-			unlimitedScore = 0;
-			streak = 0;
-			seenMediaIds = [];
-		} else {
-			dailyAttempts = [];
-			dailyFinished = false;
-			dailyWon = false;
-			dailyReveal = null;
-			dailyStateToken = null;
-		}
+		const hasExisting =
+			nextMode === 'classic'
+				? Boolean(classicRound || classicReveal || classicFinished)
+				: nextMode === 'unlimited'
+					? Boolean(unlimitedRound || unlimitedReveal)
+					: Boolean(dailyRound);
 
-		fetchRound(nextMode);
+		if (!hasExisting) {
+			fetchRound(nextMode);
+		}
+	}
+
+	function restartClassicRun() {
+		mode = 'classic';
+		syncModeUrl('classic');
+		classicRound = null;
+		classicReveal = null;
+		classicRoundIndex = 0;
+		classicHistory = [];
+		classicScore = 0;
+		classicStreak = 0;
+		classicFinished = false;
+		classicSeenIds = [];
+		fetchRound('classic');
 	}
 
 	function toggleDailyScope() {
@@ -401,11 +519,13 @@
 		} catch {
 			// ignore
 		}
+		dailyRound = null;
 		dailyAttempts = [];
 		dailyFinished = false;
 		dailyWon = false;
 		dailyReveal = null;
 		dailyStateToken = null;
+		dailyCompletedHint = readDailyDoneHint(dailyScopeHintKey);
 		fetchRound('daily');
 	}
 
@@ -464,9 +584,8 @@
 						res.status === 403 ||
 						/expired|mismatch|out of sync/i.test(errMsg))
 				) {
-					roundError = 'Daily session refreshed — loading today’s puzzle.';
 					submitting = false;
-					fetchRound('daily');
+					fetchRound('daily', 'Daily session refreshed — showing your latest progress.');
 					return;
 				}
 				if (reqMode === 'daily') {
@@ -479,47 +598,72 @@
 
 			if (reqMode === 'daily') {
 				const wordleRes = data as WordleGuessResponse;
+				const nextIdx = dailyAttempts.length;
 				dailyAttempts = [...dailyAttempts, wordleRes.attempt];
 				dailyFinished = wordleRes.finished;
 				dailyWon = wordleRes.won;
 				dailyStateToken = wordleRes.dailyStateToken;
-				if (wordleRes.nextImageUrl && currentRound) {
-					currentRound = {
-						...currentRound,
+				if (wordleRes.nextImageUrl && dailyRound) {
+					dailyRound = {
+						...dailyRound,
 						imageUrl: wordleRes.nextImageUrl
 					};
 				}
 				if (wordleRes.reveal) {
 					dailyReveal = wordleRes.reveal;
 				}
-			} else {
-				const classicRes = data as ClassicGuessResponse;
-				activeReveal = classicRes;
-				seenMediaIds = [...seenMediaIds, classicRes.reveal.anilistId];
-
-				if (classicRes.animeMatch === 'exact') {
-					streak++;
-					if (reqMode === 'unlimited' && streak > bestStreak) {
-						bestStreak = streak;
-						try {
-							localStorage.setItem(STORAGE_BEST_STREAK_KEY, String(bestStreak));
-						} catch {
-							// ignore
-						}
-					}
-				} else {
-					streak = 0;
+				if (wordleRes.finished) {
+					writeDailyDoneHint(dailyScopeHintKey, true);
 				}
 
+				const a = wordleRes.attempt;
+				srAnnouncement = wordleRes.won
+					? `Solved in ${dailyAttempts.length} of 5! ${wordleRes.reveal?.titleRomaji}, episode ${wordleRes.reveal?.episodeNumber}.`
+					: a.gaveUp
+						? `Gave up. The answer was ${wordleRes.reveal?.titleRomaji}, episode ${wordleRes.reveal?.episodeNumber}.`
+						: `Guess ${a.attemptNumber}: ${a.guessedTitle}, ${a.animeStatus === 'hit' ? 'correct anime' : a.animeStatus === 'close' ? 'same franchise' : 'wrong anime'}. Episode ${a.guessedEpisode}${a.episodeDirection === 'up' ? ', answer is later' : a.episodeDirection === 'down' ? ', answer is earlier' : ''}.`;
+
+				// On narrow viewports, smoothly reveal the newly scored row below the input
+				if (typeof window !== 'undefined' && window.innerWidth <= 960) {
+					tick().then(() => {
+						document.getElementById(`daily-row-${nextIdx}`)?.scrollIntoView({
+							behavior: 'smooth',
+							block: 'nearest'
+						});
+					});
+				}
+			} else {
+				const classicRes = data as ClassicGuessResponse;
+
 				if (reqMode === 'classic') {
+					classicReveal = classicRes;
+					classicSeenIds = [...classicSeenIds, classicRes.reveal.anilistId];
 					classicScore += classicRes.totalPoints;
+					classicStreak = classicRes.animeMatch === 'exact' ? classicStreak + 1 : 0;
 					classicHistory = [
 						...classicHistory,
 						{ roundIndex: classicRoundIndex, result: classicRes }
 					];
 				} else {
+					unlimitedReveal = classicRes;
+					unlimitedSeenIds = [...unlimitedSeenIds, classicRes.reveal.anilistId];
 					unlimitedScore += classicRes.totalPoints;
+					if (classicRes.animeMatch === 'exact') {
+						unlimitedStreak++;
+						if (unlimitedStreak > bestStreak) {
+							bestStreak = unlimitedStreak;
+							try {
+								localStorage.setItem(STORAGE_BEST_STREAK_KEY, String(bestStreak));
+							} catch {
+								// ignore
+							}
+						}
+					} else {
+						unlimitedStreak = 0;
+					}
 				}
+
+				srAnnouncement = `${classicRes.reveal.titleRomaji}, episode ${classicRes.reveal.episodeNumber}. Scored ${classicRes.totalPoints} of 1,000 points.`;
 			}
 		} catch {
 			if (reqSeq === roundRequestSeq) {
@@ -536,7 +680,7 @@
 		if (mode === 'classic') {
 			if (classicRoundIndex + 1 >= CLASSIC_ROUNDS) {
 				classicFinished = true;
-				activeReveal = null;
+				classicReveal = null;
 				return;
 			}
 			classicRoundIndex++;
@@ -607,31 +751,71 @@
 </script>
 
 <div class="app-shell">
+	<!-- Polite screen-reader announcer for Classic reveals and Daily attempt results -->
+	<div class="sr-only" aria-live="polite" aria-atomic="true">{srAnnouncement}</div>
+
 	<AppHeader
 		{mode}
 		username={profile.username}
 		avatar={profile.avatar}
 		eligibleShows={profile.eligibleShows}
 		isGlobalPool={profile.isGlobalPool}
-		dailyUnplayed={!dailyFinished}
-		onModeChange={(next) => {
-			if (next !== mode) resetAndStartMode(next);
-		}}
+		dailyUnplayed={!dailyFinished && !dailyCompletedHint}
+		onModeChange={switchMode}
 		onOpenSetup={() => {
 			setupError = null;
 			setupOpen = true;
 		}}
 	/>
 
-	{#if profile.isGlobalPool && !profileLoading}
+	{#if failedSavedUser}
+		<div class="shell nudge-wrap">
+			<div class="anilist-nudge warn" role="status">
+				<span>
+					Couldn’t load AniList user <b>{failedSavedUser.username}</b> ({failedSavedUser.reason}). Playing curated Global Pool for now.
+				</span>
+				<div class="nudge-actions">
+					<button
+						type="button"
+						class="nudge-btn"
+						onclick={() => {
+							if (!failedSavedUser) return;
+							loadProfile(
+								failedSavedUser.username,
+								failedSavedUser.statuses,
+								failedSavedUser.includeSingleEp,
+								true,
+								false
+							);
+						}}
+					>
+						Retry {failedSavedUser.username}
+					</button>
+					<button type="button" class="nudge-dismiss" onclick={() => (failedSavedUser = null)}>
+						Dismiss
+					</button>
+				</div>
+			</div>
+		</div>
+	{:else if profile.isGlobalPool && !profileLoading && !nudgeDismissed}
 		<div class="shell nudge-wrap">
 			<div class="anilist-nudge">
 				<span>
 					Playing curated Global Pool ({profile.eligibleShows} iconic anime). Connect your AniList to guess frames from your own watched shows.
 				</span>
-				<button type="button" class="nudge-btn" onclick={() => (setupOpen = true)}>
-					Connect AniList
-				</button>
+				<div class="nudge-actions">
+					<button type="button" class="nudge-btn" onclick={() => (setupOpen = true)}>
+						Connect AniList
+					</button>
+					<button
+						type="button"
+						class="nudge-dismiss"
+						aria-label="Dismiss Global Pool notice"
+						onclick={() => (nudgeDismissed = true)}
+					>
+						×
+					</button>
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -643,7 +827,7 @@
 		{classicScore}
 		{unlimitedCount}
 		{unlimitedScore}
-		{streak}
+		streak={activeStreak}
 		{bestStreak}
 		dailyPuzzleNumber={currentRound?.dailyMeta?.puzzleNumber}
 		dailyScopeLabel={currentRound?.dailyMeta?.scopeLabel}
@@ -683,8 +867,8 @@
 				<ClassicSummary
 					username={profile.username}
 					rounds={classicHistory}
-					onPlayAgain={() => resetAndStartMode('classic')}
-					onSwitchDaily={() => resetAndStartMode('daily')}
+					onPlayAgain={restartClassicRun}
+					onSwitchDaily={() => switchMode('daily')}
 				/>
 			</div>
 		{:else}
@@ -760,8 +944,8 @@
 								? 'View final summary'
 								: 'Next frame'}
 							afterSummary={mode === 'classic'
-								? `${classicScore.toLocaleString('en-US')} after ${classicRoundIndex + 1} of ${CLASSIC_ROUNDS}`
-								: `${unlimitedScore.toLocaleString('en-US')} total`}
+								? `Total ${classicScore.toLocaleString('en-US')} · round ${classicRoundIndex + 1} of ${CLASSIC_ROUNDS}`
+								: `Total ${unlimitedScore.toLocaleString('en-US')}`}
 							shortcutsEnabled={!setupOpen && !lightboxOpen}
 							onNext={advanceAfterReveal}
 						/>
@@ -830,6 +1014,21 @@
 		color: var(--text-2);
 	}
 
+	.anilist-nudge.warn {
+		border-left-color: var(--yellow);
+	}
+
+	.anilist-nudge b {
+		color: var(--paper);
+	}
+
+	.nudge-actions {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		flex: none;
+	}
+
 	.nudge-btn {
 		background: var(--paper);
 		color: var(--ink-deep);
@@ -839,12 +1038,27 @@
 		font-size: 13.5px;
 		font-weight: 700;
 		white-space: nowrap;
-		flex: none;
 		transition: background-color 120ms ease;
 	}
 
 	.nudge-btn:hover {
 		background: var(--paper-hover);
+	}
+
+	.nudge-dismiss {
+		background: none;
+		border: 0;
+		color: var(--text-3);
+		padding: 6px 8px;
+		border-radius: 6px;
+		font-size: 14px;
+		line-height: 1;
+		transition: background-color 120ms ease, color 120ms ease;
+	}
+
+	.nudge-dismiss:hover {
+		background: var(--ink-raised);
+		color: var(--paper);
 	}
 
 	.stage {
@@ -894,7 +1108,6 @@
 	}
 
 	@media (max-width: 960px) {
-		/* On narrow viewports, put Daily guess controls directly beneath the frame/zoom ladder so the image stays visible while typing */
 		.right-rail.daily-rail .daily-input-slot {
 			order: 1;
 		}

@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { WORDLE_ZOOM_STEPS } from '$lib/scoring';
 import type { AnimePoolItem, EpisodeReveal, GameMode } from '$lib/types';
 import { fetchAniZipEpisodes, filterWatchedEpisodes } from './anizip';
@@ -90,6 +93,87 @@ interface ResolvedDailyPick {
 
 const resolvedDailyPickCache = new Map<string, ResolvedDailyPick>();
 const DAILY_PICK_TTL_MS = 36 * 60 * 60 * 1000;
+let picksHydrated = false;
+let picksFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let picksShutdownHooked = false;
+
+function getPicksFile(): string {
+	return process.env.DAILY_PICKS_PATH || join(process.cwd(), '.cache', 'daily-picks.json');
+}
+
+function isPicksMemoryOnly(): boolean {
+	return Boolean(process.env.VITEST) && !process.env.DAILY_PICKS_PATH;
+}
+
+function hydrateDailyPicks(): void {
+	if (picksHydrated) return;
+	picksHydrated = true;
+	if (isPicksMemoryOnly()) return;
+	try {
+		const file = getPicksFile();
+		if (!existsSync(file)) return;
+		const parsed = JSON.parse(readFileSync(file, 'utf8')) as Record<string, ResolvedDailyPick>;
+		const now = Date.now();
+		for (const [k, v] of Object.entries(parsed)) {
+			if (v && typeof v.cachedAt === 'number' && now - v.cachedAt < DAILY_PICK_TTL_MS) {
+				resolvedDailyPickCache.set(k, v);
+			}
+		}
+	} catch {
+		// ignore corrupt cache
+	}
+}
+
+function serializeDailyPicks(): string {
+	const now = Date.now();
+	const obj: Record<string, ResolvedDailyPick> = {};
+	for (const [k, v] of resolvedDailyPickCache) {
+		if (now - v.cachedAt < DAILY_PICK_TTL_MS) {
+			obj[k] = v;
+		}
+	}
+	return JSON.stringify(obj);
+}
+
+function scheduleDailyPicksPersist(): void {
+	if (isPicksMemoryOnly()) return;
+	if (!picksShutdownHooked) {
+		picksShutdownHooked = true;
+		const flushSync = () => {
+			if (!picksFlushTimer) return;
+			clearTimeout(picksFlushTimer);
+			picksFlushTimer = null;
+			try {
+				const file = getPicksFile();
+				mkdirSync(dirname(file), { recursive: true });
+				const tmp = `${file}.${process.pid}.tmp`;
+				writeFileSync(tmp, serializeDailyPicks(), 'utf8');
+				renameSync(tmp, file);
+			} catch {
+				// non-fatal
+			}
+		};
+		process.once('SIGTERM', flushSync);
+		process.once('SIGINT', flushSync);
+		process.once('beforeExit', flushSync);
+	}
+	if (picksFlushTimer) return;
+	picksFlushTimer = setTimeout(async () => {
+		picksFlushTimer = null;
+		try {
+			const file = getPicksFile();
+			await mkdir(dirname(file), { recursive: true });
+			const tmp = `${file}.${process.pid}.tmp`;
+			await writeFile(tmp, serializeDailyPicks(), 'utf8');
+			await rename(tmp, file);
+		} catch {
+			// non-fatal
+		}
+	}, 1_500);
+	if (typeof picksFlushTimer === 'object' && 'unref' in picksFlushTimer) {
+		picksFlushTimer.unref();
+	}
+}
 
 function sealDailyFromCachedPick(
 	pick: ResolvedDailyPick,
@@ -166,8 +250,9 @@ export async function pickRoundFromPool(params: {
 		throw new Error('No eligible anime found in this list. Try including more list statuses.');
 	}
 
-	// Reuse the first resolved Daily pick for (date, scopeKey) so all players share the exact same Global Daily
+	// Reuse the persisted Daily pick for (date, scopeKey) so restarts never shift today's Global Daily
 	if (mode === 'daily' && dailyBinding) {
+		hydrateDailyPicks();
 		const dailyKey = `${dailyBinding.dailyDate}|${dailyBinding.scopeKey}`;
 		const cachedPick = resolvedDailyPickCache.get(dailyKey);
 		if (cachedPick && Date.now() - cachedPick.cachedAt < DAILY_PICK_TTL_MS) {
@@ -188,7 +273,7 @@ export async function pickRoundFromPool(params: {
 
 	const ordered = shuffleWithRng(candidates, rng);
 	const maxAttempts = Math.min(ordered.length, 12);
-	const batchSize = seed ? 1 : 3; // Seeded Daily stays strictly deterministic; random modes probe 3 at a time for low latency
+	const batchSize = seed ? 1 : 3;
 
 	for (let start = 0; start < maxAttempts; start += batchSize) {
 		const slice = ordered.slice(start, Math.min(start + batchSize, maxAttempts));
@@ -212,7 +297,6 @@ export async function pickRoundFromPool(params: {
 			const epIndex = Math.floor(rng() * eligibleEps.length);
 			const picked = eligibleEps[epIndex];
 
-			// Focal crop point for Daily Wordle server-side progressive zoom (34%..66%)
 			const originX = Math.round(34 + rng() * 32);
 			const originY = Math.round(34 + rng() * 32);
 
@@ -314,6 +398,7 @@ export async function pickRoundFromPool(params: {
 					reveal: revealWithoutImg,
 					cachedAt: Date.now()
 				});
+				scheduleDailyPicksPersist();
 			}
 
 			return {
@@ -328,6 +413,6 @@ export async function pickRoundFromPool(params: {
 	}
 
 	throw new Error(
-		'Could not find a show with episode screencaps on ani.zip after trying several titles. Try again or broaden your AniList filters.'
+		'Could not find a show with episode screencaps right now. Try again or broaden your AniList filters.'
 	);
 }

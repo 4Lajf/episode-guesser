@@ -72,10 +72,15 @@ describe('normalizeTitle & matchAnimeTitle', () => {
 			)
 		).toBe('exact');
 
-		// Multi-word franchise prefix >= 6 chars matches later seasons, while single truncated words score wrong
+		// Symmetric franchise matching across sequel numbering and colon subtitles, while truncated words score wrong
 		expect(matchAnimeTitle('Dr. Stone', ['Dr. STONE: SCIENCE FUTURE Part 3'], [])).toBe(
 			'franchise'
 		);
+		expect(matchAnimeTitle('Overlord', ['Overlord III'], [])).toBe('franchise');
+		expect(matchAnimeTitle('Overlord III', ['Overlord'], [])).toBe('franchise');
+		expect(matchAnimeTitle('Overlord II', ['Overlord III'], [])).toBe('franchise');
+		expect(matchAnimeTitle('Bleach', ['Bleach: Sennen Kessen-hen'], [])).toBe('franchise');
+		expect(matchAnimeTitle('Bleach: Sennen Kessen-hen', ['Bleach'], [])).toBe('franchise');
 		expect(matchAnimeTitle('Mushoku', ['Mushoku Tensei: Isekai Ittara Honki Dasu'], [])).toBe(
 			'wrong'
 		);

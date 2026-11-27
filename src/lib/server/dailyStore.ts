@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { EpisodeReveal, WordleAttemptFeedback } from '$lib/types';
 
 export interface DailyServerRecord {
@@ -19,22 +20,77 @@ export interface DailyServerRecord {
 
 const MAX_RECORDS = 10_000;
 const RECORD_TTL_MS = 36 * 60 * 60 * 1000;
-const STORE_DIR = join(process.cwd(), '.cache');
-const STORE_FILE = join(STORE_DIR, 'daily-store.json');
-const FLUSH_DELAY_MS = 1_500;
+const FLUSH_DELAY_MS = 2_000;
 
 const store = new Map<string, DailyServerRecord>();
 let hydrated = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let flushInFlight = false;
+let dirtyAfterFlush = false;
 let shutdownHooked = false;
 
+function getStoreFile(): string {
+	return process.env.DAILY_STORE_PATH || join(process.cwd(), '.cache', 'daily-store.json');
+}
+
+function isTestMemoryOnly(): boolean {
+	return Boolean(process.env.VITEST) && !process.env.DAILY_STORE_PATH;
+}
+
+function serializeStore(): string {
+	const obj: Record<string, DailyServerRecord> = {};
+	for (const [k, v] of store) {
+		obj[k] = v;
+	}
+	return JSON.stringify(obj);
+}
+
+function flushToDiskSync(): void {
+	if (isTestMemoryOnly()) return;
+	flushTimer = null;
+	try {
+		const storeFile = getStoreFile();
+		mkdirSync(dirname(storeFile), { recursive: true });
+		const tmpPath = `${storeFile}.${process.pid}.tmp`;
+		writeFileSync(tmpPath, serializeStore(), 'utf8');
+		renameSync(tmpPath, storeFile);
+	} catch {
+		// non-fatal
+	}
+}
+
+async function flushToDiskAsync(): Promise<void> {
+	if (isTestMemoryOnly()) return;
+	flushTimer = null;
+	if (flushInFlight) {
+		dirtyAfterFlush = true;
+		return;
+	}
+	flushInFlight = true;
+	try {
+		const storeFile = getStoreFile();
+		await mkdir(dirname(storeFile), { recursive: true });
+		const tmpPath = `${storeFile}.${process.pid}.tmp`;
+		await writeFile(tmpPath, serializeStore(), 'utf8');
+		await rename(tmpPath, storeFile);
+	} catch {
+		// non-fatal
+	} finally {
+		flushInFlight = false;
+		if (dirtyAfterFlush) {
+			dirtyAfterFlush = false;
+			schedulePersist();
+		}
+	}
+}
+
 function ensureShutdownHooks(): void {
-	if (shutdownHooked) return;
+	if (shutdownHooked || isTestMemoryOnly()) return;
 	shutdownHooked = true;
 	const flushOnExit = () => {
-		if (flushTimer) {
-			clearTimeout(flushTimer);
-			flushToDiskNow();
+		if (flushTimer || dirtyAfterFlush) {
+			if (flushTimer) clearTimeout(flushTimer);
+			flushToDiskSync();
 		}
 	};
 	process.once('SIGTERM', flushOnExit);
@@ -45,12 +101,20 @@ function ensureShutdownHooks(): void {
 function hydrateFromDisk(): void {
 	if (hydrated) return;
 	hydrated = true;
+	if (isTestMemoryOnly()) return;
 	try {
-		if (!existsSync(STORE_FILE)) return;
-		const parsed = JSON.parse(readFileSync(STORE_FILE, 'utf8')) as Record<string, DailyServerRecord>;
+		const storeFile = getStoreFile();
+		if (!existsSync(storeFile)) return;
+		const parsed = JSON.parse(readFileSync(storeFile, 'utf8')) as Record<string, DailyServerRecord>;
 		const now = Date.now();
 		for (const [k, v] of Object.entries(parsed)) {
-			if (v && typeof v.updatedAt === 'number' && now - v.updatedAt <= RECORD_TTL_MS) {
+			if (
+				v &&
+				typeof v.updatedAt === 'number' &&
+				Array.isArray(v.attempts) &&
+				v.attempts.length > 0 &&
+				now - v.updatedAt <= RECORD_TTL_MS
+			) {
 				store.set(k, v);
 			}
 		}
@@ -59,26 +123,13 @@ function hydrateFromDisk(): void {
 	}
 }
 
-function flushToDiskNow(): void {
-	flushTimer = null;
-	try {
-		mkdirSync(STORE_DIR, { recursive: true });
-		const obj: Record<string, DailyServerRecord> = {};
-		for (const [k, v] of store) {
-			obj[k] = v;
-		}
-		const tmpPath = `${STORE_FILE}.${process.pid}.tmp`;
-		writeFileSync(tmpPath, JSON.stringify(obj), 'utf8');
-		renameSync(tmpPath, STORE_FILE);
-	} catch {
-		// non-fatal
-	}
-}
-
 function schedulePersist(): void {
+	if (isTestMemoryOnly()) return;
 	ensureShutdownHooks();
 	if (flushTimer) return;
-	flushTimer = setTimeout(flushToDiskNow, FLUSH_DELAY_MS);
+	flushTimer = setTimeout(() => {
+		void flushToDiskAsync();
+	}, FLUSH_DELAY_MS);
 	if (typeof flushTimer === 'object' && 'unref' in flushTimer) {
 		flushTimer.unref();
 	}
@@ -119,6 +170,8 @@ export function getDailyRecord(
 }
 
 export function saveDailyRecord(playerId: string, record: DailyServerRecord): void {
+	// Never allocate disk/memory records for zero-attempt anonymous page views
+	if (!record.finished && record.attempts.length === 0) return;
 	hydrateFromDisk();
 	pruneOld();
 	const key = makeKey(playerId, record.date, record.scopeKey);
@@ -131,6 +184,7 @@ export function clearDailyStoreForTests(): void {
 		clearTimeout(flushTimer);
 		flushTimer = null;
 	}
+	dirtyAfterFlush = false;
 	store.clear();
 	hydrated = true;
 }

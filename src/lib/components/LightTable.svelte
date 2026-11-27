@@ -21,12 +21,14 @@
 
 	let imgLoaded = $state(false);
 	let imgFailed = $state(false);
+	let retryCount = $state(0);
 	let imgEl = $state<HTMLImageElement | null>(null);
 
 	$effect(() => {
 		const url = imageUrl;
 		imgLoaded = false;
 		imgFailed = false;
+		retryCount = 0;
 		if (url) {
 			tick().then(() => {
 				if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
@@ -36,9 +38,19 @@
 		}
 	});
 
+	const resolvedSrc = $derived(
+		imageUrl ? (retryCount > 0 ? `${imageUrl}${imageUrl.includes('?') ? '&' : '?'}r=${retryCount}` : imageUrl) : null
+	);
+
 	const canInspect = $derived(
 		allowInspect && Boolean(imageUrl) && !loading && !imgFailed && Boolean(onInspect)
 	);
+
+	function retryImage() {
+		imgFailed = false;
+		imgLoaded = false;
+		retryCount += 1;
+	}
 </script>
 
 <figure class="cel">
@@ -68,17 +80,18 @@
 
 	<div class="frame">
 		{#if loading}
-			<div class="frame-skeleton" role="status" aria-label="Loading episode screencap">
+			<div class="frame-skeleton" role="status" aria-label="Loading episode frame">
 				<span class="spinner"></span>
-				<span class="skeleton-text">Pulling a frame from ani.zip...</span>
+				<span class="skeleton-text">Loading episode frame...</span>
 			</div>
-		{:else if !imageUrl}
+		{:else if !resolvedSrc}
 			<div class="frame-skeleton">
 				<span class="skeleton-text">Connect an AniList or select the Global Pool to load a frame.</span>
 			</div>
 		{:else if imgFailed}
-			<div class="frame-skeleton">
-				<span class="skeleton-text">Screencap failed to load. Try skipping to the next frame.</span>
+			<div class="frame-skeleton" role="alert">
+				<span class="skeleton-text">Frame failed to load.</span>
+				<button type="button" class="retry-img" onclick={retryImage}>Retry image</button>
 			</div>
 		{:else}
 			{#if !imgLoaded}
@@ -88,7 +101,7 @@
 			{/if}
 			<img
 				bind:this={imgEl}
-				src={imageUrl}
+				src={resolvedSrc}
 				{alt}
 				class="screencap-img"
 				class:ready={imgLoaded}
@@ -213,7 +226,7 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		gap: 10px;
+		gap: 12px;
 		padding: 16px;
 		text-align: center;
 		color: var(--text-2);
@@ -244,6 +257,23 @@
 	.skeleton-text {
 		font-size: 14px;
 		color: var(--text-2);
+	}
+
+	.retry-img {
+		height: 36px;
+		padding: 0 14px;
+		border-radius: var(--r);
+		border: 1.5px solid var(--line-strong);
+		background: var(--ink-deep);
+		color: var(--paper);
+		font-size: 13.5px;
+		font-weight: 600;
+		transition: border-color 120ms ease, background-color 120ms ease;
+	}
+
+	.retry-img:hover {
+		border-color: var(--paper);
+		background: var(--ink-raised);
 	}
 
 	@media (max-width: 960px) {

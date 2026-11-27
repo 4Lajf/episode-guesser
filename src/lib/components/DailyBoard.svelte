@@ -37,7 +37,6 @@
 	let copiedText = $state(false);
 	let copiedImage = $state<'idle' | 'copied' | 'saved'>('idle');
 	let resetCountdown = $state('');
-	let shareSvgEl = $state<SVGSVGElement | null>(null);
 
 	function formatUtcCountdown(): string {
 		const now = new Date();
@@ -74,9 +73,10 @@
 		});
 	}
 
-	function cellTone(status: TileStatus, dir: 'up' | 'down' | 'exact' | null): 'hit' | 'dir' | 'miss' {
+	// Strictly match server closeness status across UI grid, SVG card, and text share
+	function cellTone(status: TileStatus): 'hit' | 'close' | 'miss' {
 		if (status === 'hit') return 'hit';
-		if (status === 'close' || dir === 'up' || dir === 'down') return 'dir';
+		if (status === 'close') return 'close';
 		return 'miss';
 	}
 
@@ -87,16 +87,21 @@
 		dir: 'up' | 'down' | 'exact' | null
 	): string {
 		const valText = value && value > 0 ? String(value) : 'unknown';
-		if (status === 'hit') return `${kind} ${valText}, correct`;
+		if (status === 'hit') return `${kind} ${valText}, exact match`;
+		const prox = status === 'close' ? ', close' : ', miss';
 		const dirText =
 			dir === 'up' ? ', the answer is later' : dir === 'down' ? ', the answer is earlier' : '';
-		return `${kind} ${valText}${dirText}`;
+		return `${kind} ${valText}${prox}${dirText}`;
 	}
 
-	function svgCellFill(status: TileStatus, dir: 'up' | 'down' | 'exact' | null): string {
+	function svgCellFill(status: TileStatus): string {
 		if (status === 'hit') return '#5FBF82';
-		if (status === 'close' || dir === 'up' || dir === 'down') return '#EBC043';
+		if (status === 'close') return '#EBC043';
 		return '#272C50';
+	}
+
+	function svgIconStroke(status: TileStatus): string {
+		return status === 'miss' ? '#B4B9D6' : '#1C2039';
 	}
 
 	const solvedZoomLabel = $derived.by(() => {
@@ -135,30 +140,186 @@
 		}
 	}
 
+	function drawRoundedRect(
+		ctx: CanvasRenderingContext2D,
+		x: number,
+		y: number,
+		w: number,
+		h: number,
+		r: number
+	) {
+		ctx.beginPath();
+		ctx.moveTo(x + r, y);
+		ctx.arcTo(x + w, y, x + w, y + h, r);
+		ctx.arcTo(x + w, y + h, x, y + h, r);
+		ctx.arcTo(x, y + h, x, y, r);
+		ctx.arcTo(x, y, x + w, y, r);
+		ctx.closePath();
+	}
+
+	function drawCanvasGlyph(
+		ctx: CanvasRenderingContext2D,
+		kind: 'hit' | 'close' | 'up' | 'down' | 'x',
+		cx: number,
+		cy: number,
+		stroke: string
+	) {
+		ctx.save();
+		ctx.strokeStyle = stroke;
+		ctx.lineWidth = 2.6;
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		ctx.beginPath();
+		if (kind === 'hit') {
+			ctx.moveTo(cx - 8, cy + 0.5);
+			ctx.lineTo(cx - 2.5, cy + 6);
+			ctx.lineTo(cx + 8, cy - 6);
+		} else if (kind === 'up') {
+			ctx.moveTo(cx, cy + 7.5);
+			ctx.lineTo(cx, cy - 7.5);
+			ctx.moveTo(cx - 6, cy - 1.5);
+			ctx.lineTo(cx, cy - 7.5);
+			ctx.lineTo(cx + 6, cy - 1.5);
+		} else if (kind === 'down') {
+			ctx.moveTo(cx, cy - 7.5);
+			ctx.lineTo(cx, cy + 7.5);
+			ctx.moveTo(cx - 6, cy + 1.5);
+			ctx.lineTo(cx, cy + 7.5);
+			ctx.lineTo(cx + 6, cy + 1.5);
+		} else if (kind === 'close') {
+			ctx.moveTo(cx - 7, cy - 2);
+			ctx.quadraticCurveTo(cx - 3.5, cy - 5, cx, cy - 2);
+			ctx.quadraticCurveTo(cx + 3.5, cy + 1, cx + 7, cy - 2);
+			ctx.moveTo(cx - 7, cy + 3);
+			ctx.quadraticCurveTo(cx - 3.5, cy, cx, cy + 3);
+			ctx.quadraticCurveTo(cx + 3.5, cy + 6, cx + 7, cy + 3);
+		} else {
+			ctx.moveTo(cx - 6, cy - 6);
+			ctx.lineTo(cx + 6, cy + 6);
+			ctx.moveTo(cx + 6, cy - 6);
+			ctx.lineTo(cx - 6, cy + 6);
+		}
+		ctx.stroke();
+		ctx.restore();
+	}
+
 	async function copyShareImage() {
-		if (!shareSvgEl) return;
 		try {
-			const serialized = new XMLSerializer().serializeToString(shareSvgEl);
-			const svgBlob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
-			const url = URL.createObjectURL(svgBlob);
-
-			const img = new Image();
-			await new Promise<void>((resolve, reject) => {
-				img.onload = () => resolve();
-				img.onerror = () => reject(new Error('SVG render error'));
-				img.src = url;
-			});
-
+			if (typeof document !== 'undefined' && 'fonts' in document) {
+				await document.fonts.ready;
+			}
 			const canvas = document.createElement('canvas');
 			canvas.width = 1200;
 			canvas.height = 640;
 			const ctx = canvas.getContext('2d');
-			if (!ctx) {
-				URL.revokeObjectURL(url);
-				return;
+			if (!ctx) return;
+
+			ctx.scale(2, 2);
+			const family = "'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif";
+
+			// Paper card background
+			drawRoundedRect(ctx, 0, 0, 600, 320, 14);
+			ctx.fillStyle = '#F3EFE4';
+			ctx.fill();
+
+			// Peg holes
+			ctx.fillStyle = '#1C2039';
+			drawRoundedRect(ctx, 236, 16, 34, 10, 5);
+			ctx.fill();
+			ctx.beginPath();
+			ctx.arc(300, 21, 6, 0, Math.PI * 2);
+			ctx.fill();
+			drawRoundedRect(ctx, 330, 16, 34, 10, 5);
+			ctx.fill();
+
+			// Left typography
+			ctx.textAlign = 'left';
+			ctx.fillStyle = '#4A507A';
+			ctx.font = `600 15px ${family}`;
+			ctx.fillText('Episode Guesser', 40, 84);
+
+			ctx.fillStyle = '#1C2039';
+			ctx.font = `700 34px ${family}`;
+			ctx.fillText(`Daily frame ${puzzleNumber}`, 40, 126);
+
+			ctx.fillStyle = '#4A507A';
+			ctx.font = `400 15px ${family}`;
+			ctx.fillText(formatNiceDate(puzzleDate), 40, 152);
+
+			ctx.fillStyle = '#1C2039';
+			ctx.font = `700 25px ${family}`;
+			ctx.fillText(shareSummaryLine, 40, 212);
+
+			ctx.fillStyle = '#4A507A';
+			ctx.font = `400 15px ${family}`;
+			ctx.fillText(`${scopeLabel}${won ? `, at ${solvedZoomLabel}` : ''}`, 40, 238);
+
+			ctx.font = `400 13.5px ${family}`;
+			ctx.fillText('episode-guesser.karczma.moe', 40, 288);
+
+			// Column headers
+			ctx.textAlign = 'center';
+			ctx.fillStyle = '#4A507A';
+			ctx.font = `600 12.5px ${family}`;
+			ctx.fillText('Anime', 404, 60);
+			ctx.fillText('Year', 468, 60);
+			ctx.fillText('Episode', 532, 60);
+
+			// 5x3 grid
+			for (let r = 0; r < WORDLE_MAX_ATTEMPTS; r++) {
+				const a = attempts[r];
+				const y = 70 + r * 44;
+				const cy = y + 18;
+				const cols = [376, 440, 504];
+
+				if (a) {
+					const items: Array<{
+						status: TileStatus;
+						glyph: 'hit' | 'close' | 'up' | 'down' | 'x';
+					}> = [
+						{
+							status: a.animeStatus,
+							glyph: a.animeStatus === 'hit' ? 'hit' : a.animeStatus === 'close' ? 'close' : 'x'
+						},
+						{
+							status: a.yearStatus,
+							glyph:
+								a.yearStatus === 'hit'
+									? 'hit'
+									: a.yearDirection === 'up'
+										? 'up'
+										: a.yearDirection === 'down'
+											? 'down'
+											: 'x'
+						},
+						{
+							status: a.episodeStatus,
+							glyph:
+								a.episodeStatus === 'hit'
+									? 'hit'
+									: a.episodeDirection === 'up'
+										? 'up'
+										: a.episodeDirection === 'down'
+											? 'down'
+											: 'x'
+						}
+					];
+
+					items.forEach((cell, cIdx) => {
+						drawRoundedRect(ctx, cols[cIdx], y, 56, 36, 5);
+						ctx.fillStyle = svgCellFill(cell.status);
+						ctx.fill();
+						drawCanvasGlyph(ctx, cell.glyph, cols[cIdx] + 28, cy, svgIconStroke(cell.status));
+					});
+				} else {
+					ctx.strokeStyle = '#C7C0AD';
+					ctx.lineWidth = 1.5;
+					for (const x of cols) {
+						drawRoundedRect(ctx, x + 0.75, y + 0.75, 54.5, 34.5, 5);
+						ctx.stroke();
+					}
+				}
 			}
-			ctx.drawImage(img, 0, 0, 1200, 640);
-			URL.revokeObjectURL(url);
 
 			const pngBlob = await new Promise<Blob | null>((resolve) =>
 				canvas.toBlob((b) => resolve(b), 'image/png')
@@ -177,10 +338,10 @@
 			}
 
 			const dlUrl = URL.createObjectURL(pngBlob);
-			const a = document.createElement('a');
-			a.href = dlUrl;
-			a.download = `episode-guesser-daily-${puzzleNumber}.png`;
-			a.click();
+			const link = document.createElement('a');
+			link.href = dlUrl;
+			link.download = `episode-guesser-daily-${puzzleNumber}.png`;
+			link.click();
 			URL.revokeObjectURL(dlUrl);
 			copiedImage = 'saved';
 			setTimeout(() => (copiedImage = 'idle'), 2200);
@@ -204,16 +365,17 @@
 			{@const attempt = attempts[idx]}
 			{@const isCurrent = !finished && idx === attempts.length}
 			{#if attempt}
-				{@const yearTone = cellTone(attempt.yearStatus, attempt.yearDirection)}
-				{@const epTone = cellTone(attempt.episodeStatus, attempt.episodeDirection)}
-				<div class="g-row" role="row">
+				{@const yearTone = cellTone(attempt.yearStatus)}
+				{@const epTone = cellTone(attempt.episodeStatus)}
+				<div class="g-row" id="daily-row-{idx}" role="row">
 					<span class="g-n tnum" role="rowheader">{idx + 1}</span>
 
 					<span
 						class="cell"
 						class:hit={attempt.animeStatus === 'hit'}
-						class:dir={attempt.animeStatus === 'close'}
+						class:close={attempt.animeStatus === 'close'}
 						class:miss={attempt.animeStatus === 'miss'}
+						class:gave-up={attempt.gaveUp}
 						role="cell"
 					>
 						<span class="anime-txt">{attempt.guessedTitle}</span>
@@ -226,10 +388,7 @@
 							<span class="sr-only">, same franchise</span>
 							<span class="tilde" aria-hidden="true">≈</span>
 						{:else}
-							<span class="sr-only">, not the anime</span>
-							<svg class="icon" viewBox="0 0 20 20" aria-hidden="true">
-								<path d="M5 5l10 10M15 5 5 15" />
-							</svg>
+							<span class="sr-only">{attempt.gaveUp ? ', forfeited' : ', not the anime'}</span>
 						{/if}
 					</span>
 
@@ -277,7 +436,7 @@
 				</div>
 			{:else if isCurrent && lockedAnimeTitle}
 				<!-- Found-anime carry-forward active row -->
-				<div class="g-row" role="row" aria-current="true">
+				<div class="g-row" id="daily-row-{idx}" role="row" aria-current="true">
 					<span class="g-n tnum" role="rowheader">{idx + 1}</span>
 					<span class="cell kept" role="cell">
 						<span class="anime-txt">{lockedAnimeTitle}</span>
@@ -287,14 +446,14 @@
 					<span class="cell num edit tnum" role="cell">{liveEpisode}</span>
 				</div>
 			{:else if isCurrent}
-				<div class="g-row" role="row" aria-current="true">
+				<div class="g-row" id="daily-row-{idx}" role="row" aria-current="true">
 					<span class="g-n tnum" role="rowheader">{idx + 1}</span>
 					<span class="cell edit-idle" role="cell"></span>
 					<span class="cell empty" role="cell"></span>
 					<span class="cell empty" role="cell"></span>
 				</div>
 			{:else}
-				<div class="g-row" role="row">
+				<div class="g-row" id="daily-row-{idx}" role="row">
 					<span class="g-n tnum" role="rowheader">{idx + 1}</span>
 					<span class="cell empty" role="cell"></span>
 					<span class="cell empty" role="cell"></span>
@@ -309,17 +468,18 @@
 	{/if}
 
 	{#if !finished}
-		<ul class="legend" aria-label="What the colours mean">
+		<ul class="legend" aria-label="What the colours and arrows mean">
 			<li><i class="sw hit" aria-hidden="true"></i>Match</li>
-			<li><i class="sw dir" aria-hidden="true"></i>Arrow points toward the answer</li>
-			<li><i class="sw miss" aria-hidden="true"></i>No match</li>
+			<li><i class="sw close" aria-hidden="true"></i>Close</li>
+			<li><i class="sw miss" aria-hidden="true"></i>Miss</li>
+			<li><span class="arrow-leg" aria-hidden="true">↑↓</span>Later / earlier</li>
 		</ul>
 	{/if}
 
 	{#if finished && reveal}
 		<div class="daily-finished">
 			<div class="answer-block">
-				<span class="result-badge" class:won>{shareSummaryLine}</span>
+				<p class="answer-kicker">Today’s answer</p>
 				<h3 class="answer-title">{reveal.titleRomaji}</h3>
 				{#if showEnglish}
 					<p class="answer-sub">{reveal.titleEnglish}</p>
@@ -343,7 +503,6 @@
 			<!-- Punched Paper-Cel Spoiler-Free Share Card -->
 			<div class="share-wrap">
 				<svg
-					bind:this={shareSvgEl}
 					class="share-card"
 					viewBox="0 0 600 320"
 					xmlns="http://www.w3.org/2000/svg"
@@ -351,7 +510,6 @@
 					aria-label="Share card for Episode Guesser daily frame {puzzleNumber}. {shareSummaryLine}."
 				>
 					<rect width="600" height="320" rx="14" fill="#F3EFE4" />
-					<!-- 3 animation peg holes -->
 					<rect x="236" y="16" width="34" height="10" rx="5" fill="#1C2039" />
 					<circle cx="300" cy="21" r="6" fill="#1C2039" />
 					<rect x="330" y="16" width="34" height="10" rx="5" fill="#1C2039" />
@@ -382,13 +540,12 @@
 						{@const y = 70 + r * 44}
 						{@const cy = y + 18}
 						{#if a}
-							<!-- Anime cell -->
-							<rect x="376" y={y} width="56" height="36" rx="5" fill={svgCellFill(a.animeStatus, null)} />
+							<rect x="376" y={y} width="56" height="36" rx="5" fill={svgCellFill(a.animeStatus)} />
 							{#if a.animeStatus === 'hit'}
 								<path
 									d="M{404 - 8} {cy + 0.5}L{404 - 2.5} {cy + 6}L{404 + 8} {cy - 6}"
 									fill="none"
-									stroke="#1C2039"
+									stroke={svgIconStroke(a.animeStatus)}
 									stroke-width="2.6"
 									stroke-linecap="round"
 									stroke-linejoin="round"
@@ -397,7 +554,7 @@
 								<path
 									d="M{404 - 7} {cy - 2}q3.5 -3 7 0t7 0M{404 - 7} {cy + 3}q3.5 -3 7 0t7 0"
 									fill="none"
-									stroke="#1C2039"
+									stroke={svgIconStroke(a.animeStatus)}
 									stroke-width="2.2"
 									stroke-linecap="round"
 								/>
@@ -405,26 +562,18 @@
 								<path
 									d="M{404 - 6} {cy - 6}L{404 + 6} {cy + 6}M{404 + 6} {cy - 6}L{404 - 6} {cy + 6}"
 									fill="none"
-									stroke="#B4B9D6"
+									stroke={svgIconStroke(a.animeStatus)}
 									stroke-width="2.6"
 									stroke-linecap="round"
 								/>
 							{/if}
 
-							<!-- Year cell -->
-							<rect
-								x="440"
-								y={y}
-								width="56"
-								height="36"
-								rx="5"
-								fill={svgCellFill(a.yearStatus, a.yearDirection)}
-							/>
+							<rect x="440" y={y} width="56" height="36" rx="5" fill={svgCellFill(a.yearStatus)} />
 							{#if a.yearStatus === 'hit'}
 								<path
 									d="M{468 - 8} {cy + 0.5}L{468 - 2.5} {cy + 6}L{468 + 8} {cy - 6}"
 									fill="none"
-									stroke="#1C2039"
+									stroke={svgIconStroke(a.yearStatus)}
 									stroke-width="2.6"
 									stroke-linecap="round"
 									stroke-linejoin="round"
@@ -433,7 +582,7 @@
 								<path
 									d="M468 {cy + 7.5}V{cy - 7.5}M{468 - 6} {cy - 1.5}L468 {cy - 7.5}L{468 + 6} {cy - 1.5}"
 									fill="none"
-									stroke="#1C2039"
+									stroke={svgIconStroke(a.yearStatus)}
 									stroke-width="2.6"
 									stroke-linecap="round"
 									stroke-linejoin="round"
@@ -442,7 +591,7 @@
 								<path
 									d="M468 {cy - 7.5}V{cy + 7.5}M{468 - 6} {cy + 1.5}L468 {cy + 7.5}L{468 + 6} {cy + 1.5}"
 									fill="none"
-									stroke="#1C2039"
+									stroke={svgIconStroke(a.yearStatus)}
 									stroke-width="2.6"
 									stroke-linecap="round"
 									stroke-linejoin="round"
@@ -451,26 +600,18 @@
 								<path
 									d="M{468 - 6} {cy - 6}L{468 + 6} {cy + 6}M{468 + 6} {cy - 6}L{468 - 6} {cy + 6}"
 									fill="none"
-									stroke="#B4B9D6"
+									stroke={svgIconStroke(a.yearStatus)}
 									stroke-width="2.6"
 									stroke-linecap="round"
 								/>
 							{/if}
 
-							<!-- Episode cell -->
-							<rect
-								x="504"
-								y={y}
-								width="56"
-								height="36"
-								rx="5"
-								fill={svgCellFill(a.episodeStatus, a.episodeDirection)}
-							/>
+							<rect x="504" y={y} width="56" height="36" rx="5" fill={svgCellFill(a.episodeStatus)} />
 							{#if a.episodeStatus === 'hit'}
 								<path
 									d="M{532 - 8} {cy + 0.5}L{532 - 2.5} {cy + 6}L{532 + 8} {cy - 6}"
 									fill="none"
-									stroke="#1C2039"
+									stroke={svgIconStroke(a.episodeStatus)}
 									stroke-width="2.6"
 									stroke-linecap="round"
 									stroke-linejoin="round"
@@ -479,7 +620,7 @@
 								<path
 									d="M532 {cy + 7.5}V{cy - 7.5}M{532 - 6} {cy - 1.5}L532 {cy - 7.5}L{532 + 6} {cy - 1.5}"
 									fill="none"
-									stroke="#1C2039"
+									stroke={svgIconStroke(a.episodeStatus)}
 									stroke-width="2.6"
 									stroke-linecap="round"
 									stroke-linejoin="round"
@@ -488,7 +629,7 @@
 								<path
 									d="M532 {cy - 7.5}V{cy + 7.5}M{532 - 6} {cy + 1.5}L532 {cy + 7.5}L{532 + 6} {cy + 1.5}"
 									fill="none"
-									stroke="#1C2039"
+									stroke={svgIconStroke(a.episodeStatus)}
 									stroke-width="2.6"
 									stroke-linecap="round"
 									stroke-linejoin="round"
@@ -497,7 +638,7 @@
 								<path
 									d="M{532 - 6} {cy - 6}L{532 + 6} {cy + 6}M{532 + 6} {cy - 6}L{532 - 6} {cy + 6}"
 									fill="none"
-									stroke="#B4B9D6"
+									stroke={svgIconStroke(a.episodeStatus)}
 									stroke-width="2.6"
 									stroke-linecap="round"
 								/>
@@ -614,6 +755,15 @@
 
 	.cell.miss {
 		background: var(--ink-raised);
+		color: var(--paper);
+	}
+
+	.cell.miss.gave-up {
+		color: var(--text-3);
+		font-weight: 550;
+	}
+
+	.cell.miss .icon {
 		color: var(--text-2);
 	}
 
@@ -622,7 +772,7 @@
 		color: var(--ink-deep);
 	}
 
-	.cell.dir {
+	.cell.close {
 		background: var(--yellow);
 		color: var(--ink-deep);
 	}
@@ -669,7 +819,7 @@
 		list-style: none;
 		display: flex;
 		flex-wrap: wrap;
-		gap: 6px 16px;
+		gap: 6px 14px;
 		font-size: 13px;
 		color: var(--text-2);
 	}
@@ -677,7 +827,7 @@
 	.legend li {
 		display: inline-flex;
 		align-items: center;
-		gap: 7px;
+		gap: 6px;
 	}
 
 	.sw {
@@ -691,7 +841,7 @@
 		background: var(--green);
 	}
 
-	.sw.dir {
+	.sw.close {
 		background: var(--yellow);
 	}
 
@@ -700,7 +850,11 @@
 		box-shadow: inset 0 0 0 1px var(--line-strong);
 	}
 
-	/* Finished answer + punched paper share card */
+	.arrow-leg {
+		font-weight: 700;
+		color: var(--paper);
+	}
+
 	.daily-finished {
 		border-top: 1px solid var(--line);
 		padding-top: 16px;
@@ -714,20 +868,11 @@
 		gap: 4px;
 	}
 
-	.result-badge {
-		justify-self: start;
+	.answer-kicker {
+		margin: 0;
 		font-size: 13px;
-		font-weight: 700;
-		padding: 3px 9px;
-		border-radius: var(--r-sm);
-		background: var(--danger-soft);
-		color: var(--danger);
-		margin-bottom: 4px;
-	}
-
-	.result-badge.won {
-		background: var(--green-soft);
-		color: var(--green);
+		font-weight: 600;
+		color: var(--text-2);
 	}
 
 	.answer-title {

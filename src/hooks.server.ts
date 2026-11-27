@@ -50,8 +50,6 @@ function consumeToken(
 let warnedFallbackIp = false;
 
 function getTrustedClientIp(event: Parameters<Handle>[0]['event']): string {
-	// Rely on @sveltejs/adapter-node's ADDRESS_HEADER + XFF_DEPTH (configured in Dockerfile)
-	// rather than reading an untrusted leftmost X-Forwarded-For value.
 	try {
 		const addr = event.getClientAddress();
 		if (addr) return addr;
@@ -67,13 +65,26 @@ function getTrustedClientIp(event: Parameters<Handle>[0]['event']): string {
 	return 'unknown';
 }
 
+const CSP = [
+	"default-src 'self'",
+	"script-src 'self' 'unsafe-inline'",
+	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+	"font-src 'self' https://fonts.gstatic.com",
+	"img-src 'self' https://s4.anilist.co data: blob:",
+	"connect-src 'self'",
+	"frame-ancestors 'none'",
+	"base-uri 'self'",
+	"form-action 'self'"
+].join('; ');
+
 export const handle: Handle = async ({ event, resolve }) => {
 	const pathname = event.url.pathname;
 
 	if (
 		pathname.startsWith('/api/round') ||
 		pathname.startsWith('/api/anilist') ||
-		pathname.startsWith('/api/guess')
+		pathname.startsWith('/api/guess') ||
+		pathname.startsWith('/api/autocomplete')
 	) {
 		const ip = getTrustedClientIp(event);
 		const { allowed, retryAfterSec } = consumeToken(apiBuckets, ip, API_LIMIT);
@@ -94,5 +105,12 @@ export const handle: Handle = async ({ event, resolve }) => {
 		}
 	}
 
-	return resolve(event);
+	const response = await resolve(event);
+	response.headers.set('x-content-type-options', 'nosniff');
+	response.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
+	response.headers.set('x-frame-options', 'DENY');
+	if (!pathname.startsWith('/api/')) {
+		response.headers.set('content-security-policy', CSP);
+	}
+	return response;
 };

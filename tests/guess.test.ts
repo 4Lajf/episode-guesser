@@ -197,6 +197,78 @@ describe('POST /api/guess security & scoring invariants', () => {
 		expect(replayRescoped.status).toBe(409);
 	});
 
+	it('serializes parallel Daily guesses so only one attempt can succeed per state token', async () => {
+		const pid = 'player-race';
+		const roundId = 'daily-race-1';
+		const dailyDate = '2026-11-27';
+		const scopeKey = 'global';
+
+		const roundToken = sealPayload<SealedRoundSecret>({
+			typ: 'round',
+			v: 1,
+			roundId,
+			mode: 'daily',
+			createdAt: Date.now(),
+			rawImageUrl: 'https://artworks.thetvdb.com/banners/v4/episode/1/screencap/a.jpg',
+			originX: 50,
+			originY: 50,
+			targetTitles: [REVEAL.titleRomaji, REVEAL.titleEnglish!],
+			franchiseTitles: [],
+			reveal: REVEAL,
+			dailyDate,
+			scopeKey,
+			playerId: pid
+		});
+
+		const initialStateToken = sealPayload<SealedDailyState>({
+			typ: 'daily',
+			v: 1,
+			roundId,
+			dailyDate,
+			scopeKey,
+			playerId: pid,
+			attemptsUsed: 0,
+			finished: false,
+			usedKeys: []
+		});
+
+		// Slow down AniList fallback fetch so all 5 concurrent guesses overlap
+		vi.spyOn(globalThis, 'fetch').mockImplementation(
+			() =>
+				new Promise((resolve) =>
+					setTimeout(
+						() =>
+							resolve(
+								new Response(JSON.stringify({ data: { Media: null } }), {
+									status: 200,
+									headers: { 'content-type': 'application/json' }
+								})
+							),
+						30
+					)
+				)
+		);
+
+		const responses = await Promise.all(
+			[1, 2, 3, 4, 5].map((ep) =>
+				guessPost(
+					makeEvent(
+						{
+							roundToken,
+							dailyStateToken: initialStateToken,
+							guessedTitle: 'Cowboy Bebop',
+							guessedEpisode: ep
+						},
+						pid
+					)
+				)
+			)
+		);
+
+		const statuses = responses.map((r) => r.status).sort();
+		expect(statuses).toEqual([200, 409, 409, 409, 409]);
+	});
+
 	it('does NOT award exact credit for partial free-text like "Mushoku" via AniList fuzzy search', async () => {
 		// Mock AniList GraphQL fuzzy search returning Mushoku Tensei for partial query "Mushoku"
 		vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
