@@ -320,41 +320,39 @@ export function listDailyDatesDescending(todayUtc: string = getTodayUtcDate()): 
 
 export function buildWordleShareText(params: {
 	puzzleNumber: number;
-	scopeLabel: string;
+	scopeLabel?: string;
 	attempts: WordleAttemptFeedback[];
 	won: boolean;
 }): string {
-	const { puzzleNumber, scopeLabel, attempts, won } = params;
+	const { puzzleNumber, attempts, won } = params;
 	const scoreStr = won ? `${attempts.length}/${WORDLE_MAX_ATTEMPTS}` : `X/${WORDLE_MAX_ATTEMPTS}`;
+	const gaveUp = attempts.some((a) => Boolean(a.gaveUp));
+	const animeHitAttempt = attempts.find((a) => a.animeStatus === 'hit')?.attemptNumber ?? null;
+	const hasFranchiseHit = attempts.some((a) => a.animeStatus === 'close');
+	const points = calculateDailyLeaderboardPoints({
+		won,
+		gaveUp,
+		attemptsUsed: attempts.length,
+		animeHitAttempt,
+		hasFranchiseHit
+	});
 	const tile = (status: TileStatus) => {
 		if (status === 'hit') return '🟩';
 		if (status === 'close') return '🟨';
 		return '⬛';
 	};
-	const arrow = (dir: Direction, solved: boolean) => {
-		if (solved) return '✅';
-		if (dir === 'up') return '⬆️';
-		if (dir === 'down') return '⬇️';
-		if (dir === 'exact') return '🎯';
-		return '🏳️';
-	};
 
-	const lines = attempts.map((a) => {
-		const aTile = tile(a.animeStatus);
-		const yTile = tile(a.yearStatus);
-		const eTile = tile(a.episodeStatus);
-		return `${aTile}${yTile}${eTile} ${arrow(a.episodeDirection, a.solved)}`;
-	});
+	const lines = attempts.map((a) => `${tile(a.animeStatus)}${tile(a.yearStatus)}${tile(a.episodeStatus)}`);
 
 	return [
-		`Episode Guesser Daily #${puzzleNumber} (${scopeLabel}) — ${scoreStr}`,
+		`Episode Guesser #${puzzleNumber} — ${scoreStr} · ${points.toLocaleString('en-US')} pts`,
 		...lines,
 		'https://episode-guesser.karczma.moe'
 	].join('\n');
 }
 
 export function buildClassicShareText(params: {
-	username: string;
+	username?: string;
 	rounds: CompletedClassicRound[];
 }): string {
 	const total = params.rounds.reduce((sum, r) => sum + r.result.totalPoints, 0);
@@ -369,14 +367,14 @@ export function buildClassicShareText(params: {
 		.join('');
 
 	return [
-		`Episode Guesser (${params.username}) — ${total.toLocaleString('en-US')} / ${max.toLocaleString('en-US')}`,
+		`Episode Guesser Classic — ${total.toLocaleString('en-US')} / ${max.toLocaleString('en-US')}`,
 		bars,
 		'https://episode-guesser.karczma.moe'
 	].join('\n');
 }
 
 export function buildUnlimitedShareText(params: {
-	username: string;
+	username?: string;
 	rounds: CompletedClassicRound[];
 	peakStreak: number;
 }): string {
@@ -392,7 +390,7 @@ export function buildUnlimitedShareText(params: {
 	const overflow = params.rounds.length > 20 ? ` +${params.rounds.length - 20}` : '';
 
 	return [
-		`Episode Guesser Unlimited (${params.username}) — ${total.toLocaleString('en-US')} pts · ${params.rounds.length} ${params.rounds.length === 1 ? 'frame' : 'frames'} · Peak streak ${params.peakStreak}`,
+		`Episode Guesser Unlimited — ${total.toLocaleString('en-US')} pts · ${params.rounds.length} ${params.rounds.length === 1 ? 'frame' : 'frames'} · Streak ${params.peakStreak}`,
 		`${bars}${overflow}`,
 		'https://episode-guesser.karczma.moe'
 	].join('\n');

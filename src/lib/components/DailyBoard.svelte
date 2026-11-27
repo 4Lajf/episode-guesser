@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		buildWordleShareText,
+		calculateDailyLeaderboardPoints,
 		WORDLE_MAX_ATTEMPTS,
 		WORDLE_ZOOM_STEPS
 	} from '$lib/scoring';
@@ -129,6 +130,22 @@
 
 	const animeHitAttempt = $derived(
 		attempts.find((a) => a.animeStatus === 'hit')?.attemptNumber ?? null
+	);
+
+	const dailyPoints = $derived(
+		calculateDailyLeaderboardPoints({
+			won,
+			gaveUp: attempts.some((a) => Boolean(a.gaveUp)),
+			attemptsUsed: attempts.length,
+			animeHitAttempt,
+			hasFranchiseHit: attempts.some((a) => a.animeStatus === 'close')
+		})
+	);
+
+	const shareDetailLine = $derived(
+		won
+			? `${dailyPoints.toLocaleString('en-US')} pts · ${solvedZoomLabel}`
+			: `${dailyPoints.toLocaleString('en-US')} pts`
 	);
 
 	const shareSummaryLine = $derived(
@@ -290,7 +307,7 @@
 
 			ctx.fillStyle = '#1C2039';
 			ctx.font = `700 34px ${family}`;
-			ctx.fillText(`Daily frame ${puzzleNumber}`, 40, 126);
+			ctx.fillText(`Daily #${puzzleNumber}`, 40, 126);
 
 			ctx.fillStyle = '#4A507A';
 			ctx.font = `400 15px ${family}`;
@@ -302,7 +319,7 @@
 
 			ctx.fillStyle = '#4A507A';
 			ctx.font = `400 15px ${family}`;
-			ctx.fillText(`${scopeLabel}${won ? `, at ${solvedZoomLabel}` : ''}`, 40, 238);
+			ctx.fillText(shareDetailLine, 40, 238);
 
 			ctx.font = `400 13.5px ${family}`;
 			ctx.fillText('episode-guesser.karczma.moe', 40, 288);
@@ -570,13 +587,13 @@
 					<g font-family="'Bricolage Grotesque','Segoe UI',system-ui,sans-serif" fill="#1C2039">
 						<text x="40" y="84" font-size="15" font-weight="650" fill="#4A507A">Episode Guesser</text>
 						<text x="40" y="126" font-size="34" font-weight="750" letter-spacing="-0.5">
-							Daily frame {puzzleNumber}
+							Daily #{puzzleNumber}
 						</text>
 						<text x="40" y="152" font-size="15" fill="#4A507A">{formatNiceDate(puzzleDate)}</text>
 
 						<text x="40" y="212" font-size="25" font-weight="750">{shareSummaryLine}</text>
 						<text x="40" y="238" font-size="15" fill="#4A507A">
-							{scopeLabel}{won ? `, at ${solvedZoomLabel}` : ''}
+							{shareDetailLine}
 						</text>
 
 						<text x="40" y="288" font-size="13.5" fill="#4A507A">episode-guesser.karczma.moe</text>

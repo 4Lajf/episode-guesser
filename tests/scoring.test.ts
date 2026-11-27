@@ -223,14 +223,16 @@ describe('evaluateWordleAttempt & share text', () => {
 			attempts: [miss, exact],
 			won: true
 		});
-		expect(share).toContain('2/5');
-		expect(share).toContain('✅');
+		expect(share).toContain('#366 — 2/5 · 850 pts');
+		expect(share).toContain('⬛🟨⬛\n🟩🟩🟩');
+		expect(share).not.toContain('Global Daily');
+		expect(share).not.toContain('⬆️');
+		expect(share).not.toContain('✅');
 		expect(share).toContain('episode-guesser.karczma.moe');
 
-		// Give-up row (episodeDirection === null) must NOT emit a checkmark
+		// Give-up row produces clean black tiles and 0 pts
 		const giveUpShare = buildWordleShareText({
 			puzzleNumber: 1,
-			scopeLabel: 'Global Daily',
 			attempts: [
 				{
 					attemptNumber: 1,
@@ -242,36 +244,15 @@ describe('evaluateWordleAttempt & share text', () => {
 					yearDirection: null,
 					episodeStatus: 'miss',
 					episodeDirection: null,
+					gaveUp: true,
 					solved: false
 				}
 			],
 			won: false
 		});
-		expect(giveUpShare).toContain('🏳️');
+		expect(giveUpShare).toContain('#1 — X/5 · 0 pts');
+		expect(giveUpShare).toContain('⬛⬛⬛');
 		expect(giveUpShare).not.toContain('✅');
-
-		// Wrong anime with exact episode number must NOT emit ✅ (solved), uses 🎯 instead
-		const wrongAnimeExactEpShare = buildWordleShareText({
-			puzzleNumber: 2,
-			scopeLabel: 'Global Daily',
-			attempts: [
-				{
-					attemptNumber: 1,
-					guessedTitle: 'Steins;Gate',
-					guessedEpisode: 3,
-					guessedYear: 2011,
-					animeStatus: 'miss',
-					yearStatus: 'miss',
-					yearDirection: 'up',
-					episodeStatus: 'close',
-					episodeDirection: 'exact',
-					solved: false
-				}
-			],
-			won: false
-		});
-		expect(wrongAnimeExactEpShare).toContain('🎯');
-		expect(wrongAnimeExactEpShare).not.toContain('✅');
 
 		const classicShare = buildClassicShareText({
 			username: 'sampleplayer',
@@ -291,6 +272,7 @@ describe('evaluateWordleAttempt & share text', () => {
 			]
 		});
 		expect(classicShare).toContain('1,000 / 1,000');
+		expect(classicShare).not.toContain('sampleplayer');
 
 		const unlimitedShare = buildUnlimitedShareText({
 			username: 'Global Pool',
@@ -311,7 +293,8 @@ describe('evaluateWordleAttempt & share text', () => {
 			]
 		});
 		expect(unlimitedShare).toContain('Unlimited');
-		expect(unlimitedShare).toContain('Peak streak 3');
+		expect(unlimitedShare).toContain('Streak 3');
+		expect(unlimitedShare).not.toContain('Global Pool');
 		expect(UNLIMITED_MAX_LIVES).toBe(3);
 		expect(WORDLE_ZOOM_STEPS[0]).toBeGreaterThanOrEqual(4.0);
 		expect(WORDLE_ZOOM_STEPS[WORDLE_ZOOM_STEPS.length - 1]).toBe(1.0);
