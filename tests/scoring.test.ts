@@ -228,7 +228,7 @@ describe('evaluateWordleAttempt & share text', () => {
 		expect(share).not.toContain('Global Daily');
 		expect(share).not.toContain('⬆️');
 		expect(share).not.toContain('✅');
-		expect(share).toContain('episode-guesser.karczma.moe');
+		expect(share).toContain('<https://episode-guesser.karczma.moe>');
 
 		// Give-up row produces clean black tiles and 0 pts
 		const giveUpShare = buildWordleShareText({

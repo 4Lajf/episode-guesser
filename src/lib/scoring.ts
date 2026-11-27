@@ -347,7 +347,7 @@ export function buildWordleShareText(params: {
 	return [
 		`Episode Guesser #${puzzleNumber} — ${scoreStr} · ${points.toLocaleString('en-US')} pts`,
 		...lines,
-		'https://episode-guesser.karczma.moe'
+		'<https://episode-guesser.karczma.moe>'
 	].join('\n');
 }
 
@@ -369,7 +369,7 @@ export function buildClassicShareText(params: {
 	return [
 		`Episode Guesser Classic — ${total.toLocaleString('en-US')} / ${max.toLocaleString('en-US')}`,
 		bars,
-		'https://episode-guesser.karczma.moe'
+		'<https://episode-guesser.karczma.moe>'
 	].join('\n');
 }
 
@@ -392,7 +392,7 @@ export function buildUnlimitedShareText(params: {
 	return [
 		`Episode Guesser Unlimited — ${total.toLocaleString('en-US')} pts · ${params.rounds.length} ${params.rounds.length === 1 ? 'frame' : 'frames'} · Streak ${params.peakStreak}`,
 		`${bars}${overflow}`,
-		'https://episode-guesser.karczma.moe'
+		'<https://episode-guesser.karczma.moe>'
 	].join('\n');
 }
 
