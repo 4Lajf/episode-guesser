@@ -243,7 +243,7 @@ describe('evaluateWordleAttempt & share text', () => {
 		expect(wrongAnimeExactEpShare).not.toContain('✅');
 
 		const classicShare = buildClassicShareText({
-			username: '4Lajf',
+			username: 'sampleplayer',
 			rounds: [
 				{
 					roundIndex: 0,

@@ -149,7 +149,7 @@
 						id="anilist-username"
 						type="text"
 						class="user-input"
-						placeholder="e.g. 4Lajf"
+						placeholder="Your AniList username"
 						autocomplete="username"
 						disabled={loading}
 						bind:value={usernameInput}

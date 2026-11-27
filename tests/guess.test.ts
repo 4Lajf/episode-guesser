@@ -112,7 +112,7 @@ describe('POST /api/guess security & scoring invariants', () => {
 		const pid = 'player-abc';
 		const roundId = 'daily-round-1';
 		const dailyDate = '2026-11-27';
-		const scopeKey = 'user:4lajf:COMPLETED,CURRENT:0';
+		const scopeKey = 'user:sampleplayer';
 
 		const roundToken = sealPayload<SealedRoundSecret>({
 			typ: 'round',

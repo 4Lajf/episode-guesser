@@ -70,7 +70,7 @@
 		reason: string;
 	} | null>(null);
 
-	let mode = $state<GameMode>('classic');
+	let mode = $state<GameMode>('daily');
 	let roundLoading = $state(false);
 	let roundError = $state<string | null>(null);
 	let roundNotice = $state<string | null>(null);
@@ -241,7 +241,7 @@
 	function syncModeUrl(nextMode: GameMode) {
 		if (typeof window === 'undefined') return;
 		const url = new URL(window.location.href);
-		if (nextMode === 'classic') url.searchParams.delete('mode');
+		if (nextMode === 'daily') url.searchParams.delete('mode');
 		else url.searchParams.set('mode', nextMode);
 		window.history.replaceState({}, '', url.toString());
 	}

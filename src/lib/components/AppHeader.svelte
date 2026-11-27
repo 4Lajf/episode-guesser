@@ -33,9 +33,9 @@
 	);
 
 	const modes: Array<{ id: GameMode; label: string }> = [
+		{ id: 'daily', label: 'Daily frame' },
 		{ id: 'classic', label: 'Classic' },
-		{ id: 'unlimited', label: 'Unlimited' },
-		{ id: 'daily', label: 'Daily frame' }
+		{ id: 'unlimited', label: 'Unlimited' }
 	];
 </script>
 
@@ -47,7 +47,7 @@
 				href="/"
 				onclick={(e) => {
 					e.preventDefault();
-					onModeChange('classic');
+					onModeChange('daily');
 				}}
 			>
 				<svg class="brand-mark" viewBox="0 0 28 20" aria-hidden="true">

@@ -29,7 +29,7 @@ pnpm build
 
 ## Deploying on Coolify
 
-1. Create a new **Application** in Coolify connected to `4Lajf/episode-guesser` (`main` branch).
+1. Create a new **Application** in Coolify connected to this repository (`main` branch).
 2. Set **Build Pack** to **Dockerfile** (exposed port `3000`, healthcheck `/api/health`).
 3. Set **Domain** to `https://episode-guesser.karczma.moe`.
 4. Add environment variables:
