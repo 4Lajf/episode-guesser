@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CLASSIC_ROUNDS, WORDLE_MAX_ATTEMPTS } from '$lib/scoring';
+	import { CLASSIC_ROUNDS, UNLIMITED_MAX_LIVES, WORDLE_MAX_ATTEMPTS } from '$lib/scoring';
 	import type { CompletedClassicRound, GameMode } from '$lib/types';
 
 	interface Props {
@@ -9,6 +9,8 @@
 		classicScore: number;
 		unlimitedCount: number;
 		unlimitedScore: number;
+		unlimitedLives?: number;
+		unlimitedMaxLives?: number;
 		streak: number;
 		bestStreak: number;
 		dailyPuzzleNumber?: number;
@@ -30,6 +32,8 @@
 		classicScore,
 		unlimitedCount,
 		unlimitedScore,
+		unlimitedLives = UNLIMITED_MAX_LIVES,
+		unlimitedMaxLives = UNLIMITED_MAX_LIVES,
 		streak,
 		bestStreak,
 		dailyPuzzleNumber,
@@ -88,11 +92,33 @@
 				</div>
 			</dl>
 		{:else if mode === 'unlimited'}
-			<div class="rounds">
+			<div class="rounds unlimited-bar-left">
 				<span class="rounds-label">
 					Frame <b class="tnum">#{unlimitedCount + 1}</b>
 				</span>
-				<span class="sub-note">Endless run</span>
+				<ol
+					class="lives"
+					aria-label="{unlimitedLives} of {unlimitedMaxLives} lives remaining"
+					title="{unlimitedLives} of {unlimitedMaxLives} lives remaining"
+				>
+					{#each Array.from({ length: unlimitedMaxLives }) as _, idx (idx)}
+						{@const alive = idx < unlimitedLives}
+						<li class:alive class:lost={!alive} class:last-life={alive && unlimitedLives === 1}>
+							<svg class="heart" viewBox="0 0 20 20" aria-hidden="true">
+								<path
+									d="M10 16.9 8.7 15.7C4.2 11.7 1.5 9.2 1.5 6.2 1.5 3.7 3.5 1.8 5.9 1.8c1.4 0 2.8.7 3.6 1.7h1c.8-1 2.2-1.7 3.6-1.7 2.4 0 4.4 1.9 4.4 4.4 0 3-2.7 5.5-7.2 9.5L10 16.9Z"
+								/>
+							</svg>
+						</li>
+					{/each}
+				</ol>
+				<span class="sub-note lives-text tnum">
+					{unlimitedLives === 0
+						? 'Run over'
+						: unlimitedLives === 1
+							? 'Last life'
+							: `${unlimitedLives} lives`}
+				</span>
 			</div>
 
 			<dl class="tally">
@@ -175,6 +201,60 @@
 	.sub-note {
 		font-size: 14px;
 		color: var(--text-3);
+	}
+
+	.lives {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.lives li {
+		display: grid;
+		place-items: center;
+	}
+
+	.heart {
+		width: 17px;
+		height: 17px;
+		transition: transform 160ms ease, opacity 160ms ease;
+	}
+
+	.lives li.alive .heart {
+		fill: var(--danger);
+		stroke: var(--danger);
+		stroke-width: 1.25;
+	}
+
+	.lives li.last-life .heart {
+		animation: heartbeat 1.4s ease-in-out infinite;
+	}
+
+	.lives li.lost .heart {
+		fill: none;
+		stroke: var(--line-strong);
+		stroke-width: 1.5;
+		opacity: 0.65;
+	}
+
+	@keyframes heartbeat {
+		0%,
+		100% {
+			transform: scale(1);
+		}
+		20% {
+			transform: scale(1.16);
+		}
+		40% {
+			transform: scale(1);
+		}
+	}
+
+	.lives-text {
+		font-size: 13.5px;
 	}
 
 	.scope-link {
@@ -287,10 +367,14 @@
 			padding-block: 10px 8px;
 		}
 
-		.rounds:not(.daily-bar-left) {
+		.rounds:not(.daily-bar-left):not(.unlimited-bar-left) {
 			flex-direction: column;
 			align-items: flex-start;
 			gap: 7px;
+		}
+
+		.unlimited-bar-left .lives-text {
+			display: none;
 		}
 
 		.pips li {

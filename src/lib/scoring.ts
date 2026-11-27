@@ -7,9 +7,10 @@ import type {
 	WordleAttemptFeedback
 } from './types';
 
-export const WORDLE_ZOOM_STEPS = [2.2, 1.6, 1.3, 1.1, 1.0] as const;
+export const WORDLE_ZOOM_STEPS = [4.0, 2.8, 2.0, 1.4, 1.0] as const;
 export const WORDLE_MAX_ATTEMPTS = 5;
 export const CLASSIC_ROUNDS = 5;
+export const UNLIMITED_MAX_LIVES = 3;
 export const CURATED_POOL_SIZE = 249;
 
 const DAILY_EPOCH_MS = Date.UTC(2026, 0, 1);
@@ -339,6 +340,29 @@ export function buildClassicShareText(params: {
 	return [
 		`Episode Guesser (${params.username}) — ${total.toLocaleString('en-US')} / ${max.toLocaleString('en-US')}`,
 		bars,
+		'https://episode-guesser.karczma.moe'
+	].join('\n');
+}
+
+export function buildUnlimitedShareText(params: {
+	username: string;
+	rounds: CompletedClassicRound[];
+	peakStreak: number;
+}): string {
+	const total = params.rounds.reduce((sum, r) => sum + r.result.totalPoints, 0);
+	const bars = params.rounds
+		.slice(0, 20)
+		.map((r) => {
+			if (r.result.animeMatch === 'exact' && r.result.totalPoints >= 800) return '🟩';
+			if (r.result.animeMatch === 'exact' || r.result.animeMatch === 'franchise') return '🟨';
+			return '🟥';
+		})
+		.join('');
+	const overflow = params.rounds.length > 20 ? ` +${params.rounds.length - 20}` : '';
+
+	return [
+		`Episode Guesser Unlimited (${params.username}) — ${total.toLocaleString('en-US')} pts · ${params.rounds.length} ${params.rounds.length === 1 ? 'frame' : 'frames'} · Peak streak ${params.peakStreak}`,
+		`${bars}${overflow}`,
 		'https://episode-guesser.karczma.moe'
 	].join('\n');
 }

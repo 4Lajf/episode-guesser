@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CURATED_GLOBAL_POOL } from '../src/lib/curated';
 import {
 	buildClassicShareText,
+	buildUnlimitedShareText,
 	buildWordleShareText,
 	CURATED_POOL_SIZE,
 	evaluateClassicGuess,
@@ -9,7 +10,9 @@ import {
 	getDailyPuzzleNumber,
 	matchAnimeTitle,
 	normalizeTitle,
-	scoreEpisodeProximity
+	scoreEpisodeProximity,
+	UNLIMITED_MAX_LIVES,
+	WORDLE_ZOOM_STEPS
 } from '../src/lib/scoring';
 import { filterWatchedEpisodes } from '../src/lib/server/anizip';
 import { isAllowedImageUrl } from '../src/lib/server/imageHost';
@@ -261,6 +264,30 @@ describe('evaluateWordleAttempt & share text', () => {
 			]
 		});
 		expect(classicShare).toContain('1,000 / 1,000');
+
+		const unlimitedShare = buildUnlimitedShareText({
+			username: 'Global Pool',
+			peakStreak: 3,
+			rounds: [
+				{
+					roundIndex: 0,
+					result: evaluateClassicGuess({
+						mode: 'unlimited',
+						guessedTitle: 'Sousou no Frieren',
+						guessedEpisode: 3,
+						skipped: false,
+						targetTitles: ['Sousou no Frieren'],
+						franchiseTitles: [],
+						reveal: SAMPLE_REVEAL
+					})
+				}
+			]
+		});
+		expect(unlimitedShare).toContain('Unlimited');
+		expect(unlimitedShare).toContain('Peak streak 3');
+		expect(UNLIMITED_MAX_LIVES).toBe(3);
+		expect(WORDLE_ZOOM_STEPS[0]).toBeGreaterThanOrEqual(4.0);
+		expect(WORDLE_ZOOM_STEPS[WORDLE_ZOOM_STEPS.length - 1]).toBe(1.0);
 	});
 });
 

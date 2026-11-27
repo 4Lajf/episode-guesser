@@ -10,11 +10,13 @@
 	import PlayerSetupModal from '$lib/components/PlayerSetupModal.svelte';
 	import RoundReveal from '$lib/components/RoundReveal.svelte';
 	import SessionBar from '$lib/components/SessionBar.svelte';
+	import UnlimitedSummary from '$lib/components/UnlimitedSummary.svelte';
 	import {
 		CLASSIC_ROUNDS,
 		CURATED_POOL_SIZE,
 		getTodayUtcDate,
 		normalizeTitle,
+		UNLIMITED_MAX_LIVES,
 		WORDLE_ZOOM_STEPS
 	} from '$lib/scoring';
 	import type {
@@ -43,6 +45,7 @@
 	const STORAGE_USER_KEY = 'eg:anilist-config:v1';
 	const STORAGE_RECENT_KEY = 'eg:recent-users:v1';
 	const STORAGE_BEST_STREAK_KEY = 'eg:best-streak:v1';
+	const STORAGE_BEST_SCORE_KEY = 'eg:unlimited-best-score:v1';
 	const STORAGE_DAILY_SCOPE_KEY = 'eg:daily-global:v1';
 	const STORAGE_DAILY_DONE_KEY = 'eg:daily-done:v1';
 
@@ -101,6 +104,12 @@
 	let unlimitedCount = $state(0);
 	let unlimitedScore = $state(0);
 	let unlimitedStreak = $state(0);
+	let unlimitedRunPeakStreak = $state(0);
+	let unlimitedLives = $state(UNLIMITED_MAX_LIVES);
+	let unlimitedHistory = $state<CompletedClassicRound[]>([]);
+	let unlimitedFinished = $state(false);
+	let unlimitedBestScore = $state(0);
+	let unlimitedRunIsNewBest = $state(false);
 	let bestStreak = $state(0);
 	let unlimitedSeenIds = $state<number[]>([]);
 	let recentMediaIds = $state<number[]>([]);
@@ -140,8 +149,8 @@
 		if (classicHistory.length > 0 && !classicFinished) {
 			return `Changing accounts or list filters will reset your active Classic run (round ${Math.min(classicRoundIndex + 1, CLASSIC_ROUNDS)} of ${CLASSIC_ROUNDS}).`;
 		}
-		if (unlimitedCount > 0 || unlimitedReveal) {
-			return `Changing accounts or list filters will reset your active Unlimited run (${unlimitedScore.toLocaleString('en-US')} pts).`;
+		if (!unlimitedFinished && (unlimitedCount > 0 || unlimitedReveal)) {
+			return `Changing accounts or list filters will reset your active Unlimited run (${unlimitedScore.toLocaleString('en-US')} pts, ${unlimitedLives} ${unlimitedLives === 1 ? 'life' : 'lives'} left).`;
 		}
 		return null;
 	});
@@ -331,6 +340,11 @@
 		unlimitedCount = 0;
 		unlimitedScore = 0;
 		unlimitedStreak = 0;
+		unlimitedRunPeakStreak = 0;
+		unlimitedLives = UNLIMITED_MAX_LIVES;
+		unlimitedHistory = [];
+		unlimitedFinished = false;
+		unlimitedRunIsNewBest = false;
 		unlimitedSeenIds = [];
 		recentMediaIds = [];
 
@@ -498,7 +512,12 @@
 
 	function switchMode(nextMode: GameMode) {
 		if (nextMode === mode) {
-			if (!currentRound && !roundLoading && !(mode === 'classic' && classicFinished)) {
+			if (
+				!currentRound &&
+				!roundLoading &&
+				!(mode === 'classic' && classicFinished) &&
+				!(mode === 'unlimited' && unlimitedFinished)
+			) {
 				fetchRound(mode);
 			}
 			return;
@@ -513,7 +532,7 @@
 			nextMode === 'classic'
 				? Boolean(classicRound || classicReveal || classicFinished)
 				: nextMode === 'unlimited'
-					? Boolean(unlimitedRound || unlimitedReveal)
+					? Boolean(unlimitedRound || unlimitedReveal || unlimitedFinished)
 					: Boolean(dailyRound);
 
 		if (!hasExisting) {
@@ -533,6 +552,23 @@
 		classicFinished = false;
 		classicSeenIds = [];
 		fetchRound('classic');
+	}
+
+	function restartUnlimitedRun() {
+		mode = 'unlimited';
+		syncModeUrl('unlimited');
+		unlimitedRound = null;
+		unlimitedReveal = null;
+		unlimitedCount = 0;
+		unlimitedScore = 0;
+		unlimitedStreak = 0;
+		unlimitedRunPeakStreak = 0;
+		unlimitedLives = UNLIMITED_MAX_LIVES;
+		unlimitedHistory = [];
+		unlimitedFinished = false;
+		unlimitedRunIsNewBest = false;
+		unlimitedSeenIds = [];
+		fetchRound('unlimited');
 	}
 
 	function toggleDailyScope() {
@@ -672,9 +708,25 @@
 					unlimitedReveal = classicRes;
 					unlimitedSeenIds = [...unlimitedSeenIds, classicRes.reveal.anilistId];
 					recordRecentMedia(classicRes.reveal.anilistId);
+					unlimitedHistory = [
+						...unlimitedHistory,
+						{ roundIndex: unlimitedCount, result: classicRes }
+					];
 					unlimitedScore += classicRes.totalPoints;
+					if (unlimitedScore > unlimitedBestScore) {
+						unlimitedBestScore = unlimitedScore;
+						unlimitedRunIsNewBest = true;
+						try {
+							localStorage.setItem(STORAGE_BEST_SCORE_KEY, String(unlimitedBestScore));
+						} catch {
+							// ignore
+						}
+					}
 					if (classicRes.animeMatch === 'exact') {
 						unlimitedStreak++;
+						if (unlimitedStreak > unlimitedRunPeakStreak) {
+							unlimitedRunPeakStreak = unlimitedStreak;
+						}
 						if (unlimitedStreak > bestStreak) {
 							bestStreak = unlimitedStreak;
 							try {
@@ -683,8 +735,12 @@
 								// ignore
 							}
 						}
+					} else if (classicRes.animeMatch === 'franchise') {
+						// Same franchise resets streak but spares your life
+						unlimitedStreak = 0;
 					} else {
 						unlimitedStreak = 0;
+						unlimitedLives = Math.max(0, unlimitedLives - 1);
 					}
 				}
 
@@ -710,6 +766,11 @@
 			}
 			classicRoundIndex++;
 		} else if (mode === 'unlimited') {
+			if (unlimitedLives <= 0) {
+				unlimitedFinished = true;
+				unlimitedReveal = null;
+				return;
+			}
 			unlimitedCount++;
 		}
 		fetchRound(mode);
@@ -727,6 +788,11 @@
 		try {
 			const savedBest = Number(localStorage.getItem(STORAGE_BEST_STREAK_KEY) || '0');
 			if (Number.isFinite(savedBest) && savedBest > 0) bestStreak = savedBest;
+
+			const savedBestScore = Number(localStorage.getItem(STORAGE_BEST_SCORE_KEY) || '0');
+			if (Number.isFinite(savedBestScore) && savedBestScore > 0) {
+				unlimitedBestScore = savedBestScore;
+			}
 
 			const savedRecent = JSON.parse(localStorage.getItem(STORAGE_RECENT_KEY) || '[]');
 			if (Array.isArray(savedRecent)) {
@@ -852,6 +918,8 @@
 		{classicScore}
 		{unlimitedCount}
 		{unlimitedScore}
+		{unlimitedLives}
+		unlimitedMaxLives={UNLIMITED_MAX_LIVES}
 		streak={activeStreak}
 		{bestStreak}
 		dailyPuzzleNumber={currentRound?.dailyMeta?.puzzleNumber}
@@ -908,6 +976,21 @@
 					onPlayAgain={restartClassicRun}
 					onSwitchDaily={() => switchMode('daily')}
 					onSwitchUnlimited={() => switchMode('unlimited')}
+				/>
+			</div>
+		{:else if mode === 'unlimited' && unlimitedFinished}
+			<div class="shell">
+				<UnlimitedSummary
+					username={profile.username}
+					rounds={unlimitedHistory}
+					peakStreak={unlimitedRunPeakStreak}
+					{bestStreak}
+					bestScore={unlimitedBestScore}
+					isNewBestScore={unlimitedRunIsNewBest}
+					{dailyFinished}
+					onPlayAgain={restartUnlimitedRun}
+					onSwitchDaily={() => switchMode('daily')}
+					onSwitchClassic={() => switchMode('classic')}
 				/>
 			</div>
 		{:else}
@@ -984,8 +1067,20 @@
 								: `Frame #${unlimitedCount + 1} result`}
 							nextLabel={mode === 'classic' && classicRoundIndex + 1 >= CLASSIC_ROUNDS
 								? 'View final summary'
-								: 'Next frame'}
-							afterSummary=""
+								: mode === 'unlimited' && unlimitedLives <= 0
+									? 'View run summary'
+									: 'Next frame'}
+							afterSummary={mode === 'unlimited'
+								? unlimitedLives <= 0
+									? 'Out of lives'
+									: activeReveal.skipped || activeReveal.animeMatch === 'wrong'
+										? unlimitedLives === 1
+											? '−1 life · Last life left'
+											: `−1 life · ${unlimitedLives} lives left`
+										: activeReveal.animeMatch === 'franchise'
+											? 'Same franchise — life kept'
+											: ''
+								: ''}
 							shortcutsEnabled={!setupOpen && !lightboxOpen}
 							onNext={advanceAfterReveal}
 						/>
@@ -996,9 +1091,11 @@
 							disabled={profileLoading || roundLoading || !currentRound}
 							submitLabel="Lock in guess"
 							skipLabel="Skip frame"
-							confirmSkip={mode === 'unlimited' && unlimitedStreak >= 2}
-							confirmSkipLabel="Skip & end streak?"
-							scoringNote="500 points for the right anime, up to 500 more the closer your episode is."
+							confirmSkip={mode === 'unlimited' && (unlimitedLives === 1 || unlimitedStreak >= 2)}
+							confirmSkipLabel={unlimitedLives === 1 ? 'Skip & end run?' : 'Skip & lose a life?'}
+							scoringNote={mode === 'unlimited'
+								? '3 lives — missing or skipping an anime costs 1 life. Same franchise keeps your life.'
+								: '500 points for the right anime, up to 500 more the closer your episode is.'}
 							inlineError={guessInlineError}
 							roundKey={`${mode}-${roundCounter}`}
 							onSubmit={(title, ep) => submitGuess(title, ep, false)}
