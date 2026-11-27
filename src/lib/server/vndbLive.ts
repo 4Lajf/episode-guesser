@@ -373,10 +373,12 @@ export async function fetchVndbUserPool(params: {
 
 		for (const row of rows) {
 			const rawVn = row.vn;
-			if (!rawVn || !rawVn.id || seenIds.has(rawVn.id)) continue;
-			seenIds.add(rawVn.id);
-			cacheRuntimeVn(rawVnToCatalogEntry(rawVn));
-			const item = rawVnToPoolItem(rawVn);
+			const vnId = rawVn?.id || row.id;
+			if (!rawVn || !vnId || seenIds.has(vnId)) continue;
+			seenIds.add(vnId);
+			const normalizedVn: RawVndbVn = { ...rawVn, id: vnId };
+			cacheRuntimeVn(rawVnToCatalogEntry(normalizedVn));
+			const item = rawVnToPoolItem(normalizedVn);
 			if (item) pool.push(item);
 		}
 
