@@ -11,7 +11,8 @@ export const WORDLE_ZOOM_STEPS = [4.0, 2.8, 2.0, 1.4, 1.0] as const;
 export const WORDLE_MAX_ATTEMPTS = 5;
 export const CLASSIC_ROUNDS = 5;
 export const UNLIMITED_MAX_LIVES = 3;
-export const CURATED_POOL_SIZE = 249;
+export const CURATED_POOL_SIZE = 1000;
+export const CURATED_COMPACT_POOL_SIZE = 249;
 
 const DAILY_EPOCH_MS = Date.UTC(2026, 0, 1);
 

@@ -2,6 +2,45 @@ export type GameMode = 'classic' | 'unlimited' | 'daily';
 
 export type ListStatus = 'COMPLETED' | 'CURRENT' | 'PAUSED' | 'DROPPED' | 'REPEATING';
 
+export type GlobalPoolSize = 1000 | 249;
+
+export interface AuthUser {
+	anilistUserId: number;
+	username: string;
+	avatar: string | null;
+	siteUrl: string;
+}
+
+export interface LeaderboardAttemptSummary {
+	a: TileStatus;
+	y: TileStatus;
+	e: TileStatus;
+}
+
+export interface DailyLeaderboardEntry {
+	anilistUserId: number;
+	username: string;
+	avatar: string | null;
+	siteUrl: string;
+	won: boolean;
+	gaveUp: boolean;
+	attemptsUsed: number;
+	animeHitAttempt: number | null;
+	solveMs: number;
+	completedAt: number;
+	tiles: LeaderboardAttemptSummary[];
+}
+
+export interface DailyLeaderboardPayload {
+	date: string;
+	puzzleNumber: number;
+	totalPlayers: number;
+	solvedCount: number;
+	entries: DailyLeaderboardEntry[];
+	me: { rank: number; entry: DailyLeaderboardEntry } | null;
+	authConfigured: boolean;
+}
+
 export interface AutocompleteEntry {
 	/** Canonical display title */
 	t: string;
@@ -36,6 +75,7 @@ export interface AniListProfile {
 	totalEntries: number;
 	eligibleShows: number;
 	isGlobalPool: boolean;
+	globalPoolSize?: GlobalPoolSize;
 	statuses: ListStatus[];
 	includeSingleEp: boolean;
 	titlesForDropdown: string[];

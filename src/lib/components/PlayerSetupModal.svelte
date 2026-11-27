@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { CURATED_POOL_SIZE } from '$lib/scoring';
-	import type { ListStatus } from '$lib/types';
+	import { CURATED_COMPACT_POOL_SIZE, CURATED_POOL_SIZE } from '$lib/scoring';
+	import type { AuthUser, GlobalPoolSize, ListStatus } from '$lib/types';
 
 	interface Props {
 		open: boolean;
@@ -10,12 +10,16 @@
 		initialStatuses: ListStatus[];
 		initialIncludeSingleEp: boolean;
 		isGlobalPool?: boolean;
+		globalPoolSize?: GlobalPoolSize;
+		authUser?: AuthUser | null;
+		authConfigured?: boolean;
 		recentUsers: string[];
 		loading: boolean;
 		error: string | null;
 		activeRunWarning?: string | null;
 		onLoadUser: (username: string, statuses: ListStatus[], includeSingleEp: boolean) => void;
-		onUseGlobal: () => void;
+		onUseGlobal: (size: GlobalPoolSize) => void;
+		onLogout?: () => void;
 		onClose: () => void;
 	}
 
@@ -26,12 +30,16 @@
 		initialStatuses,
 		initialIncludeSingleEp,
 		isGlobalPool = false,
+		globalPoolSize = 1000,
+		authUser = null,
+		authConfigured = false,
 		recentUsers,
 		loading,
 		error,
 		activeRunWarning = null,
 		onLoadUser,
 		onUseGlobal,
+		onLogout,
 		onClose
 	}: Props = $props();
 
@@ -125,9 +133,9 @@
 		>
 			<div class="modal-head">
 				<div>
-					<h2 id="setup-modal-title" class="modal-title">Load your AniList</h2>
+					<h2 id="setup-modal-title" class="modal-title">Pool &amp; Account Settings</h2>
 					<p class="modal-sub">
-						Frames are picked from shows you have watched. Ongoing shows are capped to your episode progress.
+						Choose your anime pool for Classic &amp; Unlimited. Daily frame is always fixed to the Ranked Global Top 1,000.
 					</p>
 				</div>
 				{#if canDismiss}
@@ -135,6 +143,81 @@
 						<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" /></svg>
 					</button>
 				{/if}
+			</div>
+
+			<!-- AniList OAuth section for Ranked Daily Leaderboard -->
+			<div class="oauth-card">
+				{#if authUser}
+					<div class="oauth-user">
+						{#if authUser.avatar}
+							<img class="oauth-avatar" src={authUser.avatar} alt="" width="34" height="34" />
+						{/if}
+						<div class="oauth-user-text">
+							<b>{authUser.username}</b>
+							<span>Signed in · Ranked on Global Daily Leaderboard</span>
+						</div>
+					</div>
+					<div class="oauth-actions">
+						{#if isGlobalPool}
+							<button
+								type="button"
+								class="oauth-btn secondary"
+								disabled={loading}
+								onclick={() => onLoadUser(authUser.username, statuses, includeSingleEp)}
+							>
+								Use my list
+							</button>
+						{/if}
+						{#if onLogout}
+							<button type="button" class="oauth-btn ghost" onclick={onLogout}>
+								Sign out
+							</button>
+						{/if}
+					</div>
+				{:else}
+					<div class="oauth-user-text">
+						<b>Log in with AniList</b>
+						<span>Rank on today’s Global Daily Leaderboard and sync your progress.</span>
+					</div>
+					{#if authConfigured}
+						<a class="oauth-btn primary" href="/api/auth/anilist/login?returnTo=/">
+							Log in with AniList
+						</a>
+					{:else}
+						<span class="oauth-pending">OAuth keys not configured yet</span>
+					{/if}
+				{/if}
+			</div>
+
+			<!-- Global Pool preset selector (Top 1,000 vs Top 249) -->
+			<div class="global-presets">
+				<span class="field-label">Global Pool (Classic &amp; Unlimited)</span>
+				<div class="preset-grid">
+					<button
+						type="button"
+						class="btn-global"
+						class:active={isGlobalPool && globalPoolSize === 1000}
+						disabled={loading || (isGlobalPool && globalPoolSize === 1000)}
+						onclick={() => onUseGlobal(1000)}
+					>
+						<b>Top {CURATED_POOL_SIZE.toLocaleString('en-US')}</b>
+						<span>Popularity default</span>
+					</button>
+					<button
+						type="button"
+						class="btn-global"
+						class:active={isGlobalPool && globalPoolSize === 249}
+						disabled={loading || (isGlobalPool && globalPoolSize === 249)}
+						onclick={() => onUseGlobal(249)}
+					>
+						<b>Top {CURATED_COMPACT_POOL_SIZE}</b>
+						<span>Compact iconic pool</span>
+					</button>
+				</div>
+			</div>
+
+			<div class="modal-divider">
+				<span>or play Classic &amp; Unlimited from any AniList</span>
 			</div>
 
 			<form
@@ -151,7 +234,7 @@
 						id="anilist-username"
 						type="text"
 						class="user-input"
-						placeholder="Your AniList username"
+						placeholder="Any public AniList username"
 						autocomplete="username"
 						disabled={loading}
 						bind:value={usernameInput}
@@ -210,22 +293,6 @@
 					<div class="error-box" role="alert">{error}</div>
 				{/if}
 			</form>
-
-			<div class="modal-divider">
-				<span>or play right away</span>
-			</div>
-
-			<button
-				type="button"
-				class="btn-global"
-				class:active={isGlobalPool}
-				disabled={loading || isGlobalPool}
-				onclick={onUseGlobal}
-			>
-				{isGlobalPool
-					? `Currently playing Global Pool (${CURATED_POOL_SIZE} popular anime)`
-					: `Play with curated Global Pool (${CURATED_POOL_SIZE} popular anime)`}
-			</button>
 		</div>
 	</div>
 {/if}
@@ -243,15 +310,121 @@
 	}
 
 	.modal-card {
-		width: min(100%, 480px);
+		width: min(100%, 510px);
+		max-height: 92svh;
+		overflow-y: auto;
 		background: var(--ink);
 		border: 1.5px solid var(--line);
 		border-radius: 12px;
-		padding: 24px;
+		padding: 22px;
 		display: flex;
 		flex-direction: column;
-		gap: 18px;
+		gap: 15px;
 		box-shadow: 0 24px 60px rgba(8, 10, 22, 0.72);
+	}
+
+	.oauth-card {
+		background: var(--ink-deep);
+		border: 1px solid var(--line);
+		border-left: 3px solid var(--blue);
+		border-radius: var(--r);
+		padding: 12px 14px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+
+	.oauth-user {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-width: 0;
+	}
+
+	.oauth-avatar {
+		width: 34px;
+		height: 34px;
+		border-radius: 50%;
+		object-fit: cover;
+		flex: none;
+	}
+
+	.oauth-user-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		font-size: 13px;
+		color: var(--text-2);
+	}
+
+	.oauth-user-text b {
+		font-size: 14.5px;
+		color: var(--paper);
+	}
+
+	.oauth-actions {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.oauth-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		height: 36px;
+		padding: 0 14px;
+		border-radius: var(--r-sm);
+		font-size: 13.5px;
+		font-weight: 700;
+		text-decoration: none;
+		white-space: nowrap;
+		border: 0;
+		transition: background-color 120ms ease, color 120ms ease;
+	}
+
+	.oauth-btn.primary {
+		background: var(--paper);
+		color: var(--ink-deep);
+	}
+
+	.oauth-btn.primary:hover {
+		background: var(--paper-hover);
+	}
+
+	.oauth-btn.secondary {
+		background: var(--ink-raised);
+		color: var(--paper);
+		border: 1px solid var(--line-strong);
+	}
+
+	.oauth-btn.ghost {
+		background: none;
+		color: var(--text-2);
+	}
+
+	.oauth-btn.ghost:hover {
+		background: var(--ink-raised);
+		color: var(--paper);
+	}
+
+	.oauth-pending {
+		font-size: 12.5px;
+		color: var(--text-3);
+	}
+
+	.global-presets {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.preset-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
 	}
 
 	.modal-head {
@@ -472,14 +645,28 @@
 	}
 
 	.btn-global {
-		height: 46px;
-		background: none;
-		border: 1.5px solid var(--line-strong);
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		justify-content: center;
+		gap: 2px;
+		padding: 10px 12px;
+		background: var(--ink-deep);
+		border: 1.5px solid var(--line);
 		border-radius: var(--r);
 		color: var(--paper);
-		font-size: 14.5px;
-		font-weight: 650;
+		text-align: left;
 		transition: border-color 120ms ease, background-color 120ms ease;
+	}
+
+	.btn-global b {
+		font-size: 14.5px;
+		font-weight: 700;
+	}
+
+	.btn-global span {
+		font-size: 12.5px;
+		color: var(--text-3);
 	}
 
 	.btn-global:hover:not(:disabled) {
@@ -488,13 +675,15 @@
 	}
 
 	.btn-global:disabled {
-		opacity: 0.72;
 		cursor: default;
 	}
 
 	.btn-global.active {
-		border-color: var(--line);
-		background: var(--ink-deep);
+		border-color: var(--blue);
+		background: var(--blue-soft);
+	}
+
+	.btn-global.active span {
 		color: var(--text-2);
 	}
 </style>

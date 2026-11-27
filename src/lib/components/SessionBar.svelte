@@ -20,9 +20,6 @@
 		dailyGaveUp?: boolean;
 		dailyWon: boolean;
 		dailyFinished: boolean;
-		canSwitchDailyScope?: boolean;
-		isGlobalDaily?: boolean;
-		onToggleDailyScope?: () => void;
 	}
 
 	let {
@@ -42,10 +39,7 @@
 		dailyAnimeHitAttempt = null,
 		dailyGaveUp = false,
 		dailyWon,
-		dailyFinished,
-		canSwitchDailyScope = false,
-		isGlobalDaily = false,
-		onToggleDailyScope
+		dailyFinished
 	}: Props = $props();
 </script>
 
@@ -140,13 +134,9 @@
 				<span class="rounds-label">
 					Daily frame <b class="tnum">#{dailyPuzzleNumber ?? '—'}</b>
 				</span>
+				<span class="ranked-pill">Ranked</span>
 				{#if dailyScopeLabel}
 					<span class="sub-note">{dailyScopeLabel}</span>
-				{/if}
-				{#if canSwitchDailyScope && onToggleDailyScope}
-					<button type="button" class="scope-link" onclick={onToggleDailyScope}>
-						Switch to {isGlobalDaily ? 'your AniList daily' : 'Global Daily'}
-					</button>
 				{/if}
 			</div>
 
@@ -203,6 +193,19 @@
 		color: var(--text-3);
 	}
 
+	.ranked-pill {
+		display: inline-flex;
+		align-items: center;
+		height: 22px;
+		padding: 0 8px;
+		border-radius: 999px;
+		background: var(--blue-soft);
+		color: var(--blue);
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.01em;
+	}
+
 	.lives {
 		display: inline-flex;
 		align-items: center;
@@ -255,22 +258,6 @@
 
 	.lives-text {
 		font-size: 13.5px;
-	}
-
-	.scope-link {
-		border: 0;
-		background: none;
-		padding: 2px 6px;
-		border-radius: var(--r-sm);
-		color: var(--blue);
-		font-size: 13.5px;
-		font-weight: 600;
-		transition: background-color 120ms ease;
-	}
-
-	.scope-link:hover {
-		background: var(--ink-raised);
-		text-decoration: underline;
 	}
 
 	.pips {
@@ -402,10 +389,6 @@
 
 		.tally dd {
 			font-size: 19px;
-		}
-
-		.scope-link {
-			margin-left: -6px;
 		}
 	}
 </style>

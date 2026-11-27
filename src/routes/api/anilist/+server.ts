@@ -1,28 +1,32 @@
 import { json } from '@sveltejs/kit';
-import { CURATED_GLOBAL_POOL } from '$lib/curated';
+import { getGlobalPool } from '$lib/curated';
 import { fetchAniListProfile, sanitizeStatuses } from '$lib/server/anilist';
-import type { AniListProfile } from '$lib/types';
+import type { AniListProfile, GlobalPoolSize } from '$lib/types';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url }) => {
 	const username = url.searchParams.get('username')?.trim() ?? '';
 	const modeGlobal = url.searchParams.get('global') === '1' || !username;
+	const poolSizeParam = Number(url.searchParams.get('poolSize') || '1000');
+	const globalPoolSize: GlobalPoolSize = poolSizeParam === 249 ? 249 : 1000;
 	const statusesParam = url.searchParams.get('statuses');
 	const includeSingleEp = url.searchParams.get('includeSingleEp') === '1';
 	const forceRefresh = url.searchParams.get('refresh') === '1';
 
 	if (modeGlobal) {
+		const pool = getGlobalPool(globalPoolSize);
 		const titleSet = new Set<string>();
-		for (const item of CURATED_GLOBAL_POOL) {
+		for (const item of pool) {
 			titleSet.add(item.titleRomaji);
 			if (item.titleEnglish) titleSet.add(item.titleEnglish);
 		}
 		const globalProfile: Omit<AniListProfile, 'pool'> = {
-			username: 'Global Pool',
+			username: globalPoolSize === 249 ? 'Global Top 249' : 'Global Top 1,000',
 			avatar: null,
-			totalEntries: CURATED_GLOBAL_POOL.length,
-			eligibleShows: CURATED_GLOBAL_POOL.length,
+			totalEntries: pool.length,
+			eligibleShows: pool.length,
 			isGlobalPool: true,
+			globalPoolSize,
 			statuses: ['COMPLETED'],
 			includeSingleEp: false,
 			titlesForDropdown: Array.from(titleSet)

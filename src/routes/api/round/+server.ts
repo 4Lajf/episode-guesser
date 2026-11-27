@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { json } from '@sveltejs/kit';
-import { CURATED_GLOBAL_POOL } from '$lib/curated';
+import { CURATED_GLOBAL_POOL, getGlobalPool } from '$lib/curated';
 import {
 	getDailyPuzzleNumber,
 	getTodayUtcDate,
@@ -8,18 +8,18 @@ import {
 	WORDLE_ZOOM_STEPS
 } from '$lib/scoring';
 import { fetchAniListProfile, sanitizeStatuses } from '$lib/server/anilist';
+import { getAuthUser, PLAYER_COOKIE } from '$lib/server/auth';
 import { getDailyRecord } from '$lib/server/dailyStore';
 import { pickRoundFromPool, type SealedRoundSecret } from '$lib/server/picker';
 import { unsealPayload } from '$lib/server/token';
-import type { GameMode, ListStatus, RoundPayload } from '$lib/types';
+import type { GameMode, GlobalPoolSize, ListStatus, RoundPayload } from '$lib/types';
 import type { RequestHandler } from './$types';
-
-const PLAYER_COOKIE = 'eg_pid';
 
 export const POST: RequestHandler = async ({ request, cookies, url }) => {
 	let body: {
 		username?: string;
 		useGlobalPool?: boolean;
+		globalPoolSize?: GlobalPoolSize;
 		statuses?: ListStatus[];
 		includeSingleEp?: boolean;
 		mode?: GameMode;
@@ -35,15 +35,17 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 	const mode: GameMode =
 		body.mode === 'unlimited' || body.mode === 'daily' ? body.mode : 'classic';
 	const username = body.username?.trim() ?? '';
-	const useGlobalPool = Boolean(body.useGlobalPool) || !username;
+	// Daily frame is ALWAYS fixed to the Global Top 1,000 ranked pool
+	const useGlobalPool = mode === 'daily' || Boolean(body.useGlobalPool) || !username;
+	const globalPoolSize: GlobalPoolSize = body.globalPoolSize === 249 ? 249 : 1000;
 	const excludeMediaIds = Array.isArray(body.excludeMediaIds)
 		? body.excludeMediaIds.filter((id): id is number => typeof id === 'number')
 		: [];
 
-	let playerId = cookies.get(PLAYER_COOKIE);
-	if (!playerId) {
-		playerId = randomUUID();
-		cookies.set(PLAYER_COOKIE, playerId, {
+	let guestPid = cookies.get(PLAYER_COOKIE);
+	if (!guestPid) {
+		guestPid = randomUUID();
+		cookies.set(PLAYER_COOKIE, guestPid, {
 			path: '/',
 			httpOnly: true,
 			sameSite: 'lax',
@@ -52,34 +54,24 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 		});
 	}
 
+	const authUser = getAuthUser(cookies);
+	const playerId = authUser ? `al:${authUser.anilistUserId}` : guestPid;
+
 	try {
-		let pool = CURATED_GLOBAL_POOL;
-		let scopeLabel = 'Global Daily';
-		let scopeKey = 'global';
-		let seedKey = 'global';
+		let pool = mode === 'daily' ? CURATED_GLOBAL_POOL : getGlobalPool(globalPoolSize);
+		const scopeLabel = 'Ranked · Top 1,000';
+		const scopeKey = 'global';
+		const seedKey = 'global';
 
 		if (!useGlobalPool) {
-			// Personal Daily uses a stable canonical scope per username so toggling list filters
-			// cannot re-roll today's Daily puzzle.
-			const cleanStatuses =
-				mode === 'daily' ? (['COMPLETED', 'CURRENT'] as ListStatus[]) : sanitizeStatuses(body.statuses);
-			const includeSingleEp = mode === 'daily' ? false : Boolean(body.includeSingleEp);
-			let profile = await fetchAniListProfile({
+			const cleanStatuses = sanitizeStatuses(body.statuses);
+			const includeSingleEp = Boolean(body.includeSingleEp);
+			const profile = await fetchAniListProfile({
 				username,
 				statuses: cleanStatuses,
 				includeSingleEp
 			});
-			if (mode === 'daily' && profile.pool.length === 0) {
-				profile = await fetchAniListProfile({
-					username,
-					statuses: ['COMPLETED', 'CURRENT', 'REPEATING', 'PAUSED', 'DROPPED'],
-					includeSingleEp: true
-				});
-			}
 			pool = profile.pool;
-			scopeLabel = `${profile.username}'s list`;
-			scopeKey = `user:${profile.username.toLowerCase()}`;
-			seedKey = scopeKey;
 		}
 
 		const todayUtc = getTodayUtcDate();

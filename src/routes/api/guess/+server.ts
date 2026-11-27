@@ -15,7 +15,9 @@ import {
 	type AnimeLookupResult
 } from '$lib/server/anilist';
 import { lookupCatalogByTitle } from '$lib/server/animeCatalog';
+import { getAuthUser, getEffectiveDailyPlayerId } from '$lib/server/auth';
 import { getDailyRecord, saveDailyRecord } from '$lib/server/dailyStore';
+import { recordDailyLeaderboardResult } from '$lib/server/leaderboardStore';
 import {
 	mintImageUrl,
 	type SealedDailyState,
@@ -26,7 +28,6 @@ import type { ListStatus, WordleGuessResponse } from '$lib/types';
 import type { RequestHandler } from './$types';
 
 const ROUND_TTL_MS = 36 * 60 * 60 * 1000; // 36 hours
-const PLAYER_COOKIE = 'eg_pid';
 const MAX_CONSUMED_CLASSIC_ROUNDS = 10_000;
 
 // Synchronous in-flight mutex per (playerId, dailyDate, scopeKey) prevents parallel requests
@@ -209,13 +210,15 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		return json({ error: 'Daily session mismatch. Reload the daily frame.' }, { status: 400 });
 	}
 
-	const cookiePid = cookies.get(PLAYER_COOKIE);
-	if (!cookiePid || cookiePid !== dailyState.playerId) {
+	const effectivePid = getEffectiveDailyPlayerId(cookies);
+	if (!effectivePid || effectivePid !== dailyState.playerId) {
 		return json(
 			{ error: 'Daily session cookie missing or mismatched. Reload the daily frame.' },
 			{ status: 403 }
 		);
 	}
+
+	const authUser = getAuthUser(cookies);
 
 	const { dailyDate, scopeKey, playerId } = dailyState;
 	const lockKey = `${playerId}|${dailyDate}|${scopeKey}`;
@@ -282,6 +285,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				gaveUp: true
 			};
 
+			const finalAttempts = [...existingAttempts, giveUpAttempt];
+			const now = Date.now();
 			saveDailyRecord(playerId, {
 				date: dailyDate,
 				scopeKey,
@@ -289,13 +294,24 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				roundToken: body.roundToken,
 				dailyStateToken: nextStateToken,
 				currentImageUrl: secret.reveal.imageUrl,
-				attempts: [...existingAttempts, giveUpAttempt],
+				attempts: finalAttempts,
 				usedKeys,
 				finished: true,
 				won: false,
 				reveal: secret.reveal,
-				updatedAt: Date.now()
+				updatedAt: now
 			});
+
+			if (authUser && scopeKey === 'global') {
+				recordDailyLeaderboardResult({
+					date: dailyDate,
+					user: authUser,
+					attempts: finalAttempts,
+					won: false,
+					startedAt: secret.createdAt,
+					completedAt: now
+				});
+			}
 
 			const res: WordleGuessResponse = {
 				mode: 'daily',
@@ -406,6 +422,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 						});
 		}
 
+		const finalAttempts = [...existingAttempts, attempt];
+		const now = Date.now();
 		saveDailyRecord(playerId, {
 			date: dailyDate,
 			scopeKey,
@@ -413,13 +431,24 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			roundToken: body.roundToken,
 			dailyStateToken: nextStateToken,
 			currentImageUrl: nextImageUrl,
-			attempts: [...existingAttempts, attempt],
+			attempts: finalAttempts,
 			usedKeys: nextUsedKeys,
 			finished,
 			won: attempt.solved,
 			...(finished ? { reveal: secret.reveal } : {}),
-			updatedAt: Date.now()
+			updatedAt: now
 		});
+
+		if (finished && authUser && scopeKey === 'global') {
+			recordDailyLeaderboardResult({
+				date: dailyDate,
+				user: authUser,
+				attempts: finalAttempts,
+				won: attempt.solved,
+				startedAt: secret.createdAt,
+				completedAt: now
+			});
+		}
 
 		const response: WordleGuessResponse = {
 			mode: 'daily',

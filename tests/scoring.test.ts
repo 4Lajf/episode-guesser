@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { CURATED_GLOBAL_POOL } from '../src/lib/curated';
+import { CURATED_GLOBAL_POOL, getGlobalPool } from '../src/lib/curated';
 import {
 	buildClassicShareText,
 	buildUnlimitedShareText,
 	buildWordleShareText,
+	CURATED_COMPACT_POOL_SIZE,
 	CURATED_POOL_SIZE,
 	evaluateClassicGuess,
 	evaluateWordleAttempt,
@@ -16,6 +17,11 @@ import {
 } from '../src/lib/scoring';
 import { filterWatchedEpisodes } from '../src/lib/server/anizip';
 import { isAllowedImageUrl } from '../src/lib/server/imageHost';
+import {
+	clearLeaderboardStoreForTests,
+	getDailyLeaderboard,
+	recordDailyLeaderboardResult
+} from '../src/lib/server/leaderboardStore';
 import { sealPayload, unsealPayload } from '../src/lib/server/token';
 import type { EpisodeReveal } from '../src/lib/types';
 
@@ -307,11 +313,12 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 		]);
 	});
 
-	it('has unique valid curated IDs matching their cover URLs (including Your Lie in April = 20665)', () => {
+	it('has 1,000 unique valid Top-Popularity shows and supports Top 249 subset', () => {
 		const ids = new Set<number>();
 		for (const item of CURATED_GLOBAL_POOL) {
 			expect(ids.has(item.id)).toBe(false);
 			ids.add(item.id);
+			expect(item.episodes).toBeGreaterThan(1);
 			if (item.coverImage) {
 				const coverIdMatch = item.coverImage.match(/\/bx(\d+)-/);
 				if (coverIdMatch) {
@@ -322,7 +329,79 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 		const ylia = CURATED_GLOBAL_POOL.find((x) => x.titleRomaji === 'Shigatsu wa Kimi no Uso');
 		expect(ylia?.id).toBe(20665);
 		expect(CURATED_GLOBAL_POOL.length).toBe(CURATED_POOL_SIZE);
-		expect(CURATED_GLOBAL_POOL.length).toBeGreaterThanOrEqual(200);
+		expect(CURATED_POOL_SIZE).toBe(1000);
+		expect(getGlobalPool(249).length).toBe(CURATED_COMPACT_POOL_SIZE);
+		expect(getGlobalPool(1000).length).toBe(1000);
+	});
+
+	it('ranks Global Daily Leaderboard by won, fewest attempts, then fastest solveMs and is immutable per user/day', () => {
+		clearLeaderboardStoreForTests();
+		const date = '2026-11-27';
+		const winAttempt = evaluateWordleAttempt({
+			attemptNumber: 1,
+			guessedTitle: 'Sousou no Frieren',
+			guessedEpisode: 3,
+			guessedYear: 2023,
+			targetTitles: ['Sousou no Frieren'],
+			franchiseTitles: [],
+			actualEpisode: 3,
+			actualYear: 2023,
+			totalEpisodes: 28
+		});
+		const missAttempt = evaluateWordleAttempt({
+			attemptNumber: 1,
+			guessedTitle: 'Steins;Gate',
+			guessedEpisode: 1,
+			guessedYear: 2011,
+			targetTitles: ['Sousou no Frieren'],
+			franchiseTitles: [],
+			actualEpisode: 3,
+			actualYear: 2023,
+			totalEpisodes: 28
+		});
+
+		const base = 1_700_000_000_000;
+		recordDailyLeaderboardResult({
+			date,
+			user: { anilistUserId: 101, username: 'SlowTwo', avatar: null, siteUrl: 'https://anilist.co/user/SlowTwo' },
+			attempts: [missAttempt, { ...winAttempt, attemptNumber: 2 }],
+			won: true,
+			startedAt: base,
+			completedAt: base + 90_000
+		});
+		recordDailyLeaderboardResult({
+			date,
+			user: { anilistUserId: 102, username: 'FastTwo', avatar: null, siteUrl: 'https://anilist.co/user/FastTwo' },
+			attempts: [missAttempt, { ...winAttempt, attemptNumber: 2 }],
+			won: true,
+			startedAt: base + 500_000,
+			completedAt: base + 530_000
+		});
+		recordDailyLeaderboardResult({
+			date,
+			user: { anilistUserId: 103, username: 'OneShot', avatar: null, siteUrl: 'https://anilist.co/user/OneShot' },
+			attempts: [winAttempt],
+			won: true,
+			startedAt: base,
+			completedAt: base + 120_000
+		});
+		// Duplicate submission for user 101 must NOT overwrite their recorded 2/5 result
+		recordDailyLeaderboardResult({
+			date,
+			user: { anilistUserId: 101, username: 'SlowTwo', avatar: null, siteUrl: 'https://anilist.co/user/SlowTwo' },
+			attempts: [winAttempt],
+			won: true,
+			startedAt: base,
+			completedAt: base + 5_000
+		});
+
+		const board = getDailyLeaderboard(date, 102, true);
+		expect(board.totalPlayers).toBe(3);
+		expect(board.solvedCount).toBe(3);
+		expect(board.entries.map((e) => e.username)).toEqual(['OneShot', 'FastTwo', 'SlowTwo']);
+		expect(board.me?.rank).toBe(2);
+		expect(board.entries[2].attemptsUsed).toBe(2);
+		clearLeaderboardStoreForTests();
 	});
 
 	it('restricts image proxy hosts and protocols strictly', () => {

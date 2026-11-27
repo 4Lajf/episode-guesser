@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { GameMode } from '$lib/types';
+	import type { AuthUser, GameMode } from '$lib/types';
 
 	interface Props {
 		mode: GameMode;
@@ -7,6 +7,8 @@
 		avatar: string | null;
 		eligibleShows: number;
 		isGlobalPool: boolean;
+		authUser?: AuthUser | null;
+		authConfigured?: boolean;
 		dailyUnplayed?: boolean;
 		onModeChange: (mode: GameMode) => void;
 		onOpenSetup: () => void;
@@ -18,18 +20,33 @@
 		avatar,
 		eligibleShows,
 		isGlobalPool,
+		authUser = null,
+		authConfigured = false,
 		dailyUnplayed = true,
 		onModeChange,
 		onOpenSetup
 	}: Props = $props();
 
+	const displayAvatar = $derived(authUser?.avatar ?? avatar);
+	const displayName = $derived(authUser ? authUser.username : username);
+	const displayMeta = $derived(
+		authUser && isGlobalPool
+			? `${username}`
+			: `${eligibleShows.toLocaleString('en-US')} shows`
+	);
+
 	const initials = $derived(
-		isGlobalPool
-			? 'GL'
-			: username
+		authUser
+			? authUser.username
 					.replace(/[^a-zA-Z0-9]/g, '')
 					.slice(0, 1)
 					.toUpperCase() || 'A'
+			: isGlobalPool
+				? 'GL'
+				: username
+						.replace(/[^a-zA-Z0-9]/g, '')
+						.slice(0, 1)
+						.toUpperCase() || 'A'
 	);
 
 	const modes: Array<{ id: GameMode; label: string }> = [
@@ -86,27 +103,42 @@
 			</nav>
 		</div>
 
-		<button
-			type="button"
-			class="player"
-			onclick={onOpenSetup}
-			aria-label="{isGlobalPool
-				? `Curated Global Pool, ${eligibleShows} shows`
-				: `AniList account ${username}, ${eligibleShows} shows`}. Change account or list filters"
-		>
-			{#if avatar}
-				<img class="avatar-img" src={avatar} alt="" width="32" height="32" />
-			{:else}
-				<span class="avatar" aria-hidden="true">{initials}</span>
+		<div class="top-right">
+			{#if !authUser && authConfigured}
+				<a class="login-pill" href="/api/auth/anilist/login?returnTo=/">
+					Log in with AniList
+				</a>
 			{/if}
-			<span class="player-text">
-				<span class="player-name">{username}</span>
-				<span class="player-meta tnum">{eligibleShows} shows</span>
-			</span>
-			<svg class="chev" viewBox="0 0 20 20" aria-hidden="true">
-				<path d="M6 8l4 4 4-4" />
-			</svg>
-		</button>
+
+			<button
+				type="button"
+				class="player"
+				onclick={onOpenSetup}
+				aria-label="{authUser
+					? `Signed in as ${authUser.username}`
+					: isGlobalPool
+						? `${username}, ${eligibleShows} shows`
+						: `AniList list ${username}, ${eligibleShows} shows`}. Open pool and account settings"
+			>
+				<span class="avatar-wrap">
+					{#if displayAvatar}
+						<img class="avatar-img" src={displayAvatar} alt="" width="32" height="32" />
+					{:else}
+						<span class="avatar" aria-hidden="true">{initials}</span>
+					{/if}
+					{#if authUser}
+						<span class="auth-badge" aria-hidden="true" title="Signed in with AniList"></span>
+					{/if}
+				</span>
+				<span class="player-text">
+					<span class="player-name">{displayName}</span>
+					<span class="player-meta tnum">{displayMeta}</span>
+				</span>
+				<svg class="chev" viewBox="0 0 20 20" aria-hidden="true">
+					<path d="M6 8l4 4 4-4" />
+				</svg>
+			</button>
+		</div>
 	</div>
 </header>
 
@@ -186,8 +218,33 @@
 		flex: none;
 	}
 
-	.player {
+	.top-right {
 		justify-self: end;
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.login-pill {
+		display: inline-flex;
+		align-items: center;
+		height: 34px;
+		padding: 0 12px;
+		border-radius: var(--r-sm);
+		background: var(--paper);
+		color: var(--ink-deep);
+		font-size: 13px;
+		font-weight: 750;
+		text-decoration: none;
+		white-space: nowrap;
+		transition: background-color 120ms ease;
+	}
+
+	.login-pill:hover {
+		background: var(--paper-hover);
+	}
+
+	.player {
 		display: inline-flex;
 		align-items: center;
 		gap: 10px;
@@ -201,6 +258,24 @@
 
 	.player:hover {
 		background: var(--ink-raised);
+	}
+
+	.avatar-wrap {
+		position: relative;
+		width: 32px;
+		height: 32px;
+		flex: none;
+	}
+
+	.auth-badge {
+		position: absolute;
+		right: -1px;
+		bottom: -1px;
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: var(--green);
+		box-shadow: 0 0 0 2px var(--ink-deep);
 	}
 
 	.avatar,
@@ -280,8 +355,12 @@
 			grid-area: brand;
 		}
 
-		.player {
+		.top-right {
 			grid-area: player;
+		}
+
+		.login-pill {
+			display: none;
 		}
 
 		.modes {

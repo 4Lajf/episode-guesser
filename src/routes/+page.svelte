@@ -3,6 +3,7 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import ClassicSummary from '$lib/components/ClassicSummary.svelte';
 	import DailyBoard from '$lib/components/DailyBoard.svelte';
+	import DailyLeaderboard from '$lib/components/DailyLeaderboard.svelte';
 	import DailyZoomLadder from '$lib/components/DailyZoomLadder.svelte';
 	import FrameLightbox from '$lib/components/FrameLightbox.svelte';
 	import GuessConsole from '$lib/components/GuessConsole.svelte';
@@ -20,11 +21,14 @@
 		WORDLE_ZOOM_STEPS
 	} from '$lib/scoring';
 	import type {
+		AuthUser,
 		AutocompleteEntry,
 		ClassicGuessResponse,
 		CompletedClassicRound,
+		DailyLeaderboardPayload,
 		EpisodeReveal,
 		GameMode,
+		GlobalPoolSize,
 		ListStatus,
 		RoundPayload,
 		WordleAttemptFeedback,
@@ -37,6 +41,7 @@
 		totalEntries: number;
 		eligibleShows: number;
 		isGlobalPool: boolean;
+		globalPoolSize?: GlobalPoolSize;
 		statuses: ListStatus[];
 		includeSingleEp: boolean;
 		titlesForDropdown: string[];
@@ -46,17 +51,23 @@
 	const STORAGE_RECENT_KEY = 'eg:recent-users:v1';
 	const STORAGE_BEST_STREAK_KEY = 'eg:best-streak:v1';
 	const STORAGE_BEST_SCORE_KEY = 'eg:unlimited-best-score:v1';
-	const STORAGE_DAILY_SCOPE_KEY = 'eg:daily-global:v1';
+	const STORAGE_GLOBAL_POOL_SIZE_KEY = 'eg:global-pool-size:v1';
 	const STORAGE_DAILY_DONE_KEY = 'eg:daily-done:v1';
 
 	let autocompleteEntries = $state<AutocompleteEntry[]>([]);
+	let authUser = $state<AuthUser | null>(null);
+	let authConfigured = $state(false);
+	let globalPoolSize = $state<GlobalPoolSize>(1000);
+	let leaderboard = $state<DailyLeaderboardPayload | null>(null);
+	let leaderboardLoading = $state(false);
 
 	let profile = $state<PublicProfile>({
-		username: 'Global Pool',
+		username: 'Global Top 1,000',
 		avatar: null,
 		totalEntries: CURATED_POOL_SIZE,
 		eligibleShows: CURATED_POOL_SIZE,
 		isGlobalPool: true,
+		globalPoolSize: 1000,
 		statuses: ['COMPLETED', 'CURRENT'],
 		includeSingleEp: false,
 		titlesForDropdown: []
@@ -115,7 +126,6 @@
 	let recentMediaIds = $state<number[]>([]);
 
 	let dailyRound = $state<RoundPayload | null>(null);
-	let dailyUseGlobal = $state(false);
 	let dailyStateToken = $state<string | null>(null);
 	let dailyAttempts = $state<WordleAttemptFeedback[]>([]);
 	let dailyFinished = $state(false);
@@ -138,12 +148,7 @@
 	// so the dropdown NEVER reveals whether any anime is on the active user's list or Global Pool.
 	const dropdownEntries = $derived(autocompleteEntries);
 
-	const dailyScopeHintKey = $derived.by(() => {
-		const today = getTodayUtcDate();
-		const useGlobal = profile.isGlobalPool || dailyUseGlobal;
-		if (useGlobal) return `${today}|global`;
-		return `${today}|user:${profile.username.toLowerCase()}`;
-	});
+	const dailyScopeHintKey = $derived(`${getTodayUtcDate()}|global`);
 
 	const activeRunWarning = $derived.by(() => {
 		if (classicHistory.length > 0 && !classicFinished) {
@@ -321,11 +326,59 @@
 		}
 	}
 
+	async function loadAuthSession() {
+		try {
+			const res = await fetch('/api/auth/me');
+			if (!res.ok) return;
+			const data = (await res.json()) as {
+				user?: AuthUser | null;
+				authConfigured?: boolean;
+			};
+			authUser = data.user ?? null;
+			authConfigured = Boolean(data.authConfigured);
+		} catch {
+			// ignore
+		}
+	}
+
+	async function loadLeaderboard() {
+		leaderboardLoading = true;
+		try {
+			const res = await fetch('/api/leaderboard');
+			if (!res.ok) return;
+			leaderboard = (await res.json()) as DailyLeaderboardPayload;
+		} catch {
+			// ignore
+		} finally {
+			leaderboardLoading = false;
+		}
+	}
+
+	async function handleLogout() {
+		try {
+			await fetch('/api/auth/logout', { method: 'POST' });
+		} catch {
+			// ignore
+		}
+		authUser = null;
+		setupOpen = false;
+		dailyRound = null;
+		dailyAttempts = [];
+		dailyFinished = false;
+		dailyWon = false;
+		dailyReveal = null;
+		dailyStateToken = null;
+		loadLeaderboard();
+		if (mode === 'daily') {
+			fetchRound('daily');
+		}
+	}
+
 	function recordRecentMedia(id: number) {
 		recentMediaIds = [...recentMediaIds.filter((x) => x !== id), id].slice(-24);
 	}
 
-	function clearAllModeRuns() {
+	function clearNonDailyRuns() {
 		classicRound = null;
 		classicReveal = null;
 		classicRoundIndex = 0;
@@ -347,13 +400,6 @@
 		unlimitedRunIsNewBest = false;
 		unlimitedSeenIds = [];
 		recentMediaIds = [];
-
-		dailyRound = null;
-		dailyAttempts = [];
-		dailyFinished = false;
-		dailyWon = false;
-		dailyReveal = null;
-		dailyStateToken = null;
 	}
 
 	async function loadProfile(
@@ -361,7 +407,8 @@
 		statuses: ListStatus[] = ['COMPLETED', 'CURRENT'],
 		includeSingleEp = false,
 		closeAfter = true,
-		fallbackToGlobalOnError = false
+		fallbackToGlobalOnError = false,
+		requestedPoolSize: GlobalPoolSize = globalPoolSize
 	): Promise<boolean> {
 		setupLoading = true;
 		setupError = null;
@@ -369,6 +416,7 @@
 			const params = new URLSearchParams();
 			if (!username) {
 				params.set('global', '1');
+				params.set('poolSize', String(requestedPoolSize));
 			} else {
 				params.set('username', username);
 				params.set('statuses', statuses.join(','));
@@ -382,7 +430,7 @@
 				setupError = errMsg;
 				if (fallbackToGlobalOnError && username) {
 					failedSavedUser = { username, statuses, includeSingleEp, reason: errMsg };
-					await loadProfile(null, ['COMPLETED', 'CURRENT'], false, true, false);
+					await loadProfile(null, ['COMPLETED', 'CURRENT'], false, true, false, requestedPoolSize);
 				}
 				return false;
 			}
@@ -393,12 +441,11 @@
 
 			profile = data as PublicProfile;
 			if (profile.isGlobalPool) {
-				dailyUseGlobal = true;
-			} else {
+				globalPoolSize = profile.globalPoolSize === 249 ? 249 : 1000;
 				try {
-					dailyUseGlobal = localStorage.getItem(STORAGE_DAILY_SCOPE_KEY) === '1';
+					localStorage.setItem(STORAGE_GLOBAL_POOL_SIZE_KEY, String(globalPoolSize));
 				} catch {
-					dailyUseGlobal = false;
+					// ignore
 				}
 			}
 
@@ -426,15 +473,17 @@
 
 			dailyCompletedHint = readDailyDoneHint(dailyScopeHintKey);
 			if (closeAfter) setupOpen = false;
-			clearAllModeRuns();
-			fetchRound(mode);
+			clearNonDailyRuns();
+			if (mode !== 'daily' || !dailyRound) {
+				fetchRound(mode);
+			}
 			return true;
 		} catch {
 			const errMsg = 'Network error while reaching AniList.';
 			setupError = errMsg;
 			if (fallbackToGlobalOnError && username) {
 				failedSavedUser = { username, statuses, includeSingleEp, reason: errMsg };
-				await loadProfile(null, ['COMPLETED', 'CURRENT'], false, true, false);
+				await loadProfile(null, ['COMPLETED', 'CURRENT'], false, true, false, requestedPoolSize);
 			}
 			return false;
 		} finally {
@@ -458,8 +507,7 @@
 		setRoundForMode(targetMode, null);
 
 		try {
-			const useGlobalPool =
-				profile.isGlobalPool || (targetMode === 'daily' && dailyUseGlobal);
+			const useGlobalPool = targetMode === 'daily' || profile.isGlobalPool;
 			const excludeMediaIds =
 				targetMode === 'classic'
 					? Array.from(new Set([...classicSeenIds, ...recentMediaIds]))
@@ -474,6 +522,7 @@
 					mode: targetMode,
 					username: useGlobalPool ? undefined : profile.username,
 					useGlobalPool,
+					globalPoolSize,
 					statuses: profile.statuses,
 					includeSingleEp: profile.includeSingleEp,
 					excludeMediaIds
@@ -571,23 +620,6 @@
 		fetchRound('unlimited');
 	}
 
-	function toggleDailyScope() {
-		dailyUseGlobal = !dailyUseGlobal;
-		try {
-			localStorage.setItem(STORAGE_DAILY_SCOPE_KEY, dailyUseGlobal ? '1' : '0');
-		} catch {
-			// ignore
-		}
-		dailyRound = null;
-		dailyAttempts = [];
-		dailyFinished = false;
-		dailyWon = false;
-		dailyReveal = null;
-		dailyStateToken = null;
-		dailyCompletedHint = readDailyDoneHint(dailyScopeHintKey);
-		fetchRound('daily');
-	}
-
 	async function submitGuess(guessedTitle: string, guessedEpisode: number, skipped = false) {
 		if (!currentRound || submitting) return;
 
@@ -611,8 +643,7 @@
 		submitting = true;
 
 		try {
-			const useGlobalPool =
-				profile.isGlobalPool || (reqMode === 'daily' && dailyUseGlobal);
+			const useGlobalPool = reqMode === 'daily' || profile.isGlobalPool;
 
 			const res = await fetch('/api/guess', {
 				method: 'POST',
@@ -673,6 +704,7 @@
 				}
 				if (wordleRes.finished) {
 					writeDailyDoneHint(dailyScopeHintKey, true);
+					loadLeaderboard();
 				}
 
 				const a = wordleRes.attempt;
@@ -784,8 +816,15 @@
 
 	onMount(() => {
 		loadAutocompleteTitles();
+		loadAuthSession();
+		loadLeaderboard();
 
 		try {
+			const savedPoolSize = Number(localStorage.getItem(STORAGE_GLOBAL_POOL_SIZE_KEY) || '1000');
+			if (savedPoolSize === 249 || savedPoolSize === 1000) {
+				globalPoolSize = savedPoolSize;
+			}
+
 			const savedBest = Number(localStorage.getItem(STORAGE_BEST_STREAK_KEY) || '0');
 			if (Number.isFinite(savedBest) && savedBest > 0) bestStreak = savedBest;
 
@@ -805,12 +844,32 @@
 		const urlParams = new URLSearchParams(window.location.search);
 		const urlUser = urlParams.get('user')?.trim();
 		const urlMode = urlParams.get('mode');
+		const loggedInFlag = urlParams.get('logged_in');
+		const authErrorFlag = urlParams.get('auth_error');
+
+		if (loggedInFlag === '1') {
+			roundNotice = 'Signed in with AniList — your Daily frame results now rank on the Global Leaderboard!';
+			urlParams.delete('logged_in');
+			const cleanUrl = `${window.location.pathname}${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
+			window.history.replaceState({}, '', cleanUrl);
+		} else if (authErrorFlag) {
+			roundNotice =
+				authErrorFlag === 'cancelled'
+					? 'AniList sign-in was cancelled.'
+					: authErrorFlag === 'not_configured'
+						? 'AniList OAuth is not configured on this server yet.'
+						: 'Could not complete AniList sign-in. Please try again.';
+			urlParams.delete('auth_error');
+			const cleanUrl = `${window.location.pathname}${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
+			window.history.replaceState({}, '', cleanUrl);
+		}
+
 		if (urlMode === 'unlimited' || urlMode === 'daily' || urlMode === 'classic') {
 			mode = urlMode;
 		}
 
 		if (urlUser) {
-			loadProfile(urlUser, ['COMPLETED', 'CURRENT'], false, true, true);
+			loadProfile(urlUser, ['COMPLETED', 'CURRENT'], false, true, true, globalPoolSize);
 			return;
 		}
 
@@ -828,7 +887,8 @@
 						saved.statuses ?? ['COMPLETED', 'CURRENT'],
 						Boolean(saved.includeSingleEp),
 						true,
-						true
+						true,
+						globalPoolSize
 					);
 					return;
 				}
@@ -837,7 +897,7 @@
 			// ignore
 		}
 
-		loadProfile(null, ['COMPLETED', 'CURRENT'], false, true, false);
+		loadProfile(null, ['COMPLETED', 'CURRENT'], false, true, false, globalPoolSize);
 	});
 </script>
 
@@ -851,6 +911,8 @@
 		avatar={profile.avatar}
 		eligibleShows={profile.eligibleShows}
 		isGlobalPool={profile.isGlobalPool}
+		{authUser}
+		{authConfigured}
 		dailyUnplayed={!dailyFinished && !dailyCompletedHint}
 		onModeChange={switchMode}
 		onOpenSetup={() => {
@@ -888,20 +950,24 @@
 				</div>
 			</div>
 		</div>
-	{:else if profile.isGlobalPool && !profileLoading && !nudgeDismissed}
+	{:else if !authUser && !profileLoading && !nudgeDismissed}
 		<div class="shell nudge-wrap">
 			<div class="anilist-nudge">
 				<span class="nudge-copy">
-					Playing Global Pool ({profile.eligibleShows} popular anime). Connect your AniList to play your own list.
+					Daily frame is <b>Ranked (Top 1,000)</b>. Log in with AniList to join the Global Leaderboard or switch Classic &amp; Unlimited to Top 249 / your own list.
 				</span>
 				<div class="nudge-actions">
-					<button type="button" class="nudge-btn" onclick={() => (setupOpen = true)}>
-						Connect AniList
-					</button>
+					{#if authConfigured}
+						<a class="nudge-btn" href="/api/auth/anilist/login?returnTo=/">Log in with AniList</a>
+					{:else}
+						<button type="button" class="nudge-btn" onclick={() => (setupOpen = true)}>
+							Pool settings
+						</button>
+					{/if}
 					<button
 						type="button"
 						class="nudge-dismiss"
-						aria-label="Dismiss Global Pool notice"
+						aria-label="Dismiss notice"
 						onclick={() => (nudgeDismissed = true)}
 					>
 						×
@@ -929,9 +995,6 @@
 		dailyGaveUp={dailyAttempts.some((a) => a.gaveUp)}
 		{dailyWon}
 		{dailyFinished}
-		canSwitchDailyScope={mode === 'daily' && !profile.isGlobalPool}
-		isGlobalDaily={dailyUseGlobal}
-		onToggleDailyScope={toggleDailyScope}
 	/>
 
 	<main class="stage">
@@ -1104,6 +1167,20 @@
 					{/if}
 				</div>
 			</div>
+
+			{#if mode === 'daily'}
+				<div class="shell">
+					<DailyLeaderboard
+						{leaderboard}
+						loading={leaderboardLoading}
+						{authUser}
+						{dailyFinished}
+						{dailyWon}
+						dailyAttemptsCount={dailyAttempts.length}
+						onRefresh={loadLeaderboard}
+					/>
+				</div>
+			{/if}
 		{/if}
 	</main>
 </div>
@@ -1121,12 +1198,16 @@
 	initialStatuses={profile.statuses}
 	initialIncludeSingleEp={profile.includeSingleEp}
 	isGlobalPool={profile.isGlobalPool}
+	{globalPoolSize}
+	{authUser}
+	{authConfigured}
 	{recentUsers}
 	loading={setupLoading}
 	error={setupError}
 	{activeRunWarning}
-	onLoadUser={(u, st, inc) => loadProfile(u, st, inc, true, false)}
-	onUseGlobal={() => loadProfile(null, ['COMPLETED'], false, true, false)}
+	onLoadUser={(u, st, inc) => loadProfile(u, st, inc, true, false, globalPoolSize)}
+	onUseGlobal={(sz) => loadProfile(null, ['COMPLETED'], false, true, false, sz)}
+	onLogout={handleLogout}
 	onClose={() => (setupOpen = false)}
 />
 
@@ -1172,6 +1253,8 @@
 	}
 
 	.nudge-btn {
+		display: inline-flex;
+		align-items: center;
 		background: var(--paper);
 		color: var(--ink-deep);
 		border: 0;
@@ -1179,6 +1262,7 @@
 		padding: 5px 12px;
 		font-size: 13px;
 		font-weight: 700;
+		text-decoration: none;
 		white-space: nowrap;
 		transition: background-color 120ms ease;
 	}
