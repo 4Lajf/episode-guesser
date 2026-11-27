@@ -589,7 +589,6 @@
 		avatar={profile.avatar}
 		eligibleShows={profile.eligibleShows}
 		isGlobalPool={profile.isGlobalPool}
-		wide={mode === 'daily'}
 		onModeChange={(next) => {
 			if (next !== mode) resetAndStartMode(next);
 		}}
@@ -599,7 +598,7 @@
 		}}
 	/>
 
-	<main class="main-stage" class:wide-daily={mode === 'daily'}>
+	<main class="main-stage">
 		{#if profile.isGlobalPool && !profileLoading}
 			<div class="anilist-nudge">
 				<span>Playing curated Global Pool ({profile.eligibleShows} iconic anime). Enter your AniList to guess frames from your own watched shows.</span>
@@ -653,64 +652,70 @@
 				onInspect={() => openInspect(activeReveal?.reveal.imageUrl ?? null)}
 			/>
 		{:else if mode === 'daily'}
-			<!-- Daily Frame-Wordle: 2-column desktop layout so frame, console & board fit above the fold -->
+			<!-- Daily Frame-Wordle: 2-column desktop; mobile orders Frame -> Board -> Console so feedback is immediately visible -->
 			<div class="daily-workspace">
 				<div class="daily-left">
-					<LightTable
-						imageUrl={currentRound?.imageUrl ?? null}
-						loading={profileLoading || roundLoading}
-						compact={true}
-						caption={dailyFinished
-							? `Daily #${currentRound?.dailyMeta?.puzzleNumber ?? ''} — full frame unlocked`
-							: `Daily #${currentRound?.dailyMeta?.puzzleNumber ?? ''} — narrow it down in 5 tries`}
-						cropScale={dailyZoomScale}
-						allowInspect={dailyFinished}
-						onInspect={() => openInspect(currentRound?.imageUrl ?? null)}
-					/>
+					<div class="daily-frame-slot">
+						<LightTable
+							imageUrl={currentRound?.imageUrl ?? null}
+							loading={profileLoading || roundLoading}
+							compact={true}
+							caption={dailyFinished
+								? `Daily #${currentRound?.dailyMeta?.puzzleNumber ?? ''} — full frame unlocked`
+								: `Daily #${currentRound?.dailyMeta?.puzzleNumber ?? ''}`}
+							cropScale={dailyZoomScale}
+							allowInspect={dailyFinished}
+							onInspect={() => openInspect(currentRound?.imageUrl ?? null)}
+						/>
+					</div>
 
 					{#if !dailyFinished}
-						<GuessConsole
-							titles={dropdownTitles}
-							{submitting}
-							compact={true}
-							disabled={profileLoading || roundLoading || !currentRound}
-							submitLabel="Submit attempt"
-							skipLabel="Give up"
-							episodeHint="↑↓ direction hints"
-							prefillTitle={dailyMatchedAnimeTitle}
-							inlineError={guessInlineError}
-							roundKey={`daily-${roundCounter}-${dailyAttempts.length}`}
-							onSubmit={(title, ep) => submitGuess(title, ep, false)}
-							onSkip={() => submitGuess('', 1, true)}
-						/>
+						<div class="daily-console-slot">
+							<GuessConsole
+								titles={dropdownTitles}
+								{submitting}
+								compact={true}
+								disabled={profileLoading || roundLoading || !currentRound}
+								submitLabel="Submit attempt"
+								skipLabel="Give up"
+								episodeHint="↑↓ direction hints"
+								prefillTitle={dailyMatchedAnimeTitle}
+								inlineError={guessInlineError}
+								roundKey={`daily-${roundCounter}-${dailyAttempts.length}`}
+								onSubmit={(title, ep) => submitGuess(title, ep, false)}
+								onSkip={() => submitGuess('', 1, true)}
+							/>
+						</div>
 					{/if}
 				</div>
 
 				{#if currentRound?.dailyMeta}
-					<DailyBoard
-						puzzleNumber={currentRound.dailyMeta.puzzleNumber}
-						scopeLabel={currentRound.dailyMeta.scopeLabel}
-						attempts={dailyAttempts}
-						finished={dailyFinished}
-						won={dailyWon}
-						reveal={dailyReveal}
-						canSwitchScope={!profile.isGlobalPool}
-						isGlobalDaily={dailyUseGlobal}
-						onToggleScope={() => {
-							dailyUseGlobal = !dailyUseGlobal;
-							try {
-								localStorage.setItem(STORAGE_DAILY_SCOPE_KEY, dailyUseGlobal ? '1' : '0');
-							} catch {
-								// ignore
-							}
-							dailyAttempts = [];
-							dailyFinished = false;
-							dailyWon = false;
-							dailyReveal = null;
-							dailyStateToken = null;
-							fetchRound('daily');
-						}}
-					/>
+					<div class="daily-board-slot">
+						<DailyBoard
+							puzzleNumber={currentRound.dailyMeta.puzzleNumber}
+							scopeLabel={currentRound.dailyMeta.scopeLabel}
+							attempts={dailyAttempts}
+							finished={dailyFinished}
+							won={dailyWon}
+							reveal={dailyReveal}
+							canSwitchScope={!profile.isGlobalPool}
+							isGlobalDaily={dailyUseGlobal}
+							onToggleScope={() => {
+								dailyUseGlobal = !dailyUseGlobal;
+								try {
+									localStorage.setItem(STORAGE_DAILY_SCOPE_KEY, dailyUseGlobal ? '1' : '0');
+								} catch {
+									// ignore
+								}
+								dailyAttempts = [];
+								dailyFinished = false;
+								dailyWon = false;
+								dailyReveal = null;
+								dailyStateToken = null;
+								fetchRound('daily');
+							}}
+						/>
+					</div>
 				{/if}
 			</div>
 		{:else}
@@ -718,7 +723,7 @@
 			<LightTable
 				imageUrl={currentRound?.imageUrl ?? null}
 				loading={profileLoading || roundLoading}
-				caption="Name the anime and episode number"
+				caption=""
 				cropScale={1}
 				allowInspect={true}
 				onInspect={() => openInspect(currentRound?.imageUrl ?? null)}
@@ -769,21 +774,17 @@
 
 	.main-stage {
 		width: 100%;
-		max-width: 1120px;
+		max-width: 1180px;
 		margin: 0 auto;
-		padding: 20px 24px 56px;
+		padding: 18px 24px 120px;
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
-	}
-
-	.main-stage.wide-daily {
-		max-width: 1320px;
+		gap: 14px;
 	}
 
 	.daily-workspace {
 		display: grid;
-		grid-template-columns: minmax(0, 1.25fr) minmax(380px, 0.95fr);
+		grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.9fr);
 		gap: 18px;
 		align-items: start;
 	}
@@ -791,7 +792,7 @@
 	.daily-left {
 		display: flex;
 		flex-direction: column;
-		gap: 14px;
+		gap: 12px;
 		min-width: 0;
 	}
 
@@ -854,6 +855,23 @@
 	@media (max-width: 1120px) {
 		.daily-workspace {
 			grid-template-columns: 1fr;
+			gap: 14px;
+		}
+
+		.daily-left {
+			display: contents;
+		}
+
+		.daily-frame-slot {
+			order: 1;
+		}
+
+		.daily-board-slot {
+			order: 2;
+		}
+
+		.daily-console-slot {
+			order: 3;
 		}
 	}
 

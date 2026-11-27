@@ -11,12 +11,14 @@ export interface CropSpec {
 }
 
 export interface SealedImageSecret {
+	typ: 'image';
 	url: string;
 	exp: number;
 	crop?: CropSpec;
 }
 
 export interface SealedRoundSecret {
+	typ: 'round';
 	v: 1;
 	roundId: string;
 	mode: GameMode;
@@ -33,6 +35,7 @@ export interface SealedRoundSecret {
 }
 
 export interface SealedDailyState {
+	typ: 'daily';
 	v: 1;
 	roundId: string;
 	dailyDate: string;
@@ -47,6 +50,7 @@ export const IMAGE_TOKEN_TTL_MS = 36 * 60 * 60 * 1000; // 36 hours (outlives a f
 
 export function mintImageUrl(rawUrl: string, crop?: CropSpec): string {
 	const token = sealPayload<SealedImageSecret>({
+		typ: 'image',
 		url: rawUrl,
 		exp: Date.now() + IMAGE_TOKEN_TTL_MS,
 		...(crop && crop.scale > 1.01 ? { crop } : {})
@@ -109,116 +113,126 @@ export async function pickRoundFromPool(params: {
 	}
 
 	const ordered = shuffleWithRng(candidates, rng);
-	const maxAttempts = Math.min(ordered.length, 14);
+	const maxAttempts = Math.min(ordered.length, 12);
+	const batchSize = seed ? 1 : 3; // Seeded Daily stays strictly deterministic; random modes probe 3 at a time for low latency
 
-	for (let i = 0; i < maxAttempts; i++) {
-		const show = ordered[i];
-		let anizip = await fetchAniZipEpisodes(show.id);
-		// Retry once for seeded Daily picks so a transient hiccup doesn't diverge two players' Global Daily
-		if (!anizip && seed) {
-			anizip = await fetchAniZipEpisodes(show.id);
+	for (let start = 0; start < maxAttempts; start += batchSize) {
+		const slice = ordered.slice(start, Math.min(start + batchSize, maxAttempts));
+		const results = await Promise.all(
+			slice.map(async (show) => {
+				let anizip = await fetchAniZipEpisodes(show.id);
+				if (!anizip && seed) {
+					anizip = await fetchAniZipEpisodes(show.id);
+				}
+				return { show, anizip };
+			})
+		);
+
+		for (const { show, anizip } of results) {
+			if (!anizip) continue;
+
+			const isCompleted = show.status === 'COMPLETED' || show.status === 'REPEATING';
+			const eligibleEps = filterWatchedEpisodes(anizip.episodes, show.progress, isCompleted);
+			if (eligibleEps.length === 0) continue;
+
+			const epIndex = Math.floor(rng() * eligibleEps.length);
+			const picked = eligibleEps[epIndex];
+
+			// Focal crop point for Daily Wordle server-side progressive zoom (34%..66%)
+			const originX = Math.round(34 + rng() * 32);
+			const originY = Math.round(34 + rng() * 32);
+
+			const fullImageUrl = mintImageUrl(picked.image);
+			const initialImageUrl =
+				mode === 'daily'
+					? mintImageUrl(picked.image, {
+							scale: WORDLE_ZOOM_STEPS[0],
+							originX,
+							originY
+						})
+					: fullImageUrl;
+
+			const targetTitles = Array.from(
+				new Set(
+					[
+						show.titleRomaji,
+						show.titleEnglish,
+						show.titleNative,
+						...show.synonyms,
+						...anizip.titles
+					].filter((t): t is string => Boolean(t && t.trim()))
+				)
+			);
+
+			const totalEpisodes = Math.max(
+				show.episodes || 0,
+				anizip.maxEpisodeNumber,
+				picked.episodeNumber
+			);
+
+			const reveal: EpisodeReveal = {
+				anilistId: show.id,
+				titleRomaji: show.titleRomaji,
+				titleEnglish: show.titleEnglish,
+				episodeNumber: picked.episodeNumber,
+				totalEpisodes,
+				episodeTitle: picked.title,
+				airDate: picked.airDate,
+				overview: picked.overview,
+				seasonYear: show.seasonYear,
+				studio: show.studio,
+				coverImage: show.coverImage,
+				imageUrl: fullImageUrl,
+				anilistUrl: `https://anilist.co/anime/${show.id}`
+			};
+
+			const roundId = randomUUID();
+
+			const roundToken = sealPayload<SealedRoundSecret>({
+				typ: 'round',
+				v: 1,
+				roundId,
+				mode,
+				createdAt: Date.now(),
+				rawImageUrl: picked.image,
+				originX,
+				originY,
+				targetTitles,
+				franchiseTitles: show.franchiseTitles,
+				reveal,
+				...(dailyBinding
+					? {
+							dailyDate: dailyBinding.dailyDate,
+							scopeKey: dailyBinding.scopeKey,
+							playerId: dailyBinding.playerId
+						}
+					: {})
+			});
+
+			const dailyStateToken =
+				mode === 'daily' && dailyBinding
+					? sealPayload<SealedDailyState>({
+							typ: 'daily',
+							v: 1,
+							roundId,
+							dailyDate: dailyBinding.dailyDate,
+							scopeKey: dailyBinding.scopeKey,
+							playerId: dailyBinding.playerId,
+							attemptsUsed: 0,
+							finished: false,
+							usedKeys: []
+						})
+					: undefined;
+
+			return {
+				roundId,
+				roundToken,
+				dailyStateToken,
+				imageUrl: initialImageUrl,
+				originX,
+				originY
+			};
 		}
-		if (!anizip) continue;
-
-		const isCompleted = show.status === 'COMPLETED' || show.status === 'REPEATING';
-		const eligibleEps = filterWatchedEpisodes(anizip.episodes, show.progress, isCompleted);
-		if (eligibleEps.length === 0) continue;
-
-		const epIndex = Math.floor(rng() * eligibleEps.length);
-		const picked = eligibleEps[epIndex];
-
-		// Focal crop point for Daily Wordle server-side progressive zoom (34%..66%)
-		const originX = Math.round(34 + rng() * 32);
-		const originY = Math.round(34 + rng() * 32);
-
-		const fullImageUrl = mintImageUrl(picked.image);
-		const initialImageUrl =
-			mode === 'daily'
-				? mintImageUrl(picked.image, {
-						scale: WORDLE_ZOOM_STEPS[0],
-						originX,
-						originY
-					})
-				: fullImageUrl;
-
-		const targetTitles = Array.from(
-			new Set(
-				[
-					show.titleRomaji,
-					show.titleEnglish,
-					show.titleNative,
-					...show.synonyms,
-					...anizip.titles
-				].filter((t): t is string => Boolean(t && t.trim()))
-			)
-		);
-
-		const totalEpisodes = Math.max(
-			show.episodes || 0,
-			anizip.maxEpisodeNumber,
-			picked.episodeNumber
-		);
-
-		const reveal: EpisodeReveal = {
-			anilistId: show.id,
-			titleRomaji: show.titleRomaji,
-			titleEnglish: show.titleEnglish,
-			episodeNumber: picked.episodeNumber,
-			totalEpisodes,
-			episodeTitle: picked.title,
-			airDate: picked.airDate,
-			overview: picked.overview,
-			seasonYear: show.seasonYear,
-			studio: show.studio,
-			coverImage: show.coverImage,
-			imageUrl: fullImageUrl,
-			anilistUrl: `https://anilist.co/anime/${show.id}`
-		};
-
-		const roundId = randomUUID();
-
-		const roundToken = sealPayload<SealedRoundSecret>({
-			v: 1,
-			roundId,
-			mode,
-			createdAt: Date.now(),
-			rawImageUrl: picked.image,
-			originX,
-			originY,
-			targetTitles,
-			franchiseTitles: show.franchiseTitles,
-			reveal,
-			...(dailyBinding
-				? {
-						dailyDate: dailyBinding.dailyDate,
-						scopeKey: dailyBinding.scopeKey,
-						playerId: dailyBinding.playerId
-					}
-				: {})
-		});
-
-		const dailyStateToken =
-			mode === 'daily' && dailyBinding
-				? sealPayload<SealedDailyState>({
-						v: 1,
-						roundId,
-						dailyDate: dailyBinding.dailyDate,
-						scopeKey: dailyBinding.scopeKey,
-						playerId: dailyBinding.playerId,
-						attemptsUsed: 0,
-						finished: false,
-						usedKeys: []
-					})
-				: undefined;
-
-		return {
-			roundId,
-			roundToken,
-			dailyStateToken,
-			imageUrl: initialImageUrl,
-			originX,
-			originY
-		};
 	}
 
 	throw new Error(

@@ -50,7 +50,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	}
 
 	const secret = unsealPayload<SealedRoundSecret>(body.roundToken);
-	if (!secret || secret.v !== 1 || Date.now() - secret.createdAt > ROUND_TTL_MS) {
+	if (!secret || secret.typ !== 'round' || secret.v !== 1 || Date.now() - secret.createdAt > ROUND_TTL_MS) {
 		return json({ error: 'Round expired or invalid. Start a fresh frame.' }, { status: 400 });
 	}
 
@@ -127,6 +127,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	const dailyState = unsealPayload<SealedDailyState>(body.dailyStateToken);
 	if (
 		!dailyState ||
+		dailyState.typ !== 'daily' ||
 		dailyState.v !== 1 ||
 		dailyState.roundId !== secret.roundId ||
 		!secret.playerId ||
@@ -177,6 +178,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	if (skipped) {
 		const nextStateToken = sealPayload<SealedDailyState>({
+			typ: 'daily',
 			v: 1,
 			roundId: secret.roundId,
 			dailyDate,
@@ -302,6 +304,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	const nextUsedKeys = [...usedKeys, guessKey];
 
 	const nextStateToken = sealPayload<SealedDailyState>({
+		typ: 'daily',
 		v: 1,
 		roundId: secret.roundId,
 		dailyDate,

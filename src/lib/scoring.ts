@@ -61,14 +61,15 @@ export function matchAnimeTitle(
 	const normFranchise = new Set(franchiseTitles.map(normalizeTitle).filter(Boolean));
 	if (normFranchise.has(normGuess)) return 'franchise';
 
-	// Prefix fallback for same-franchise season subtitles (e.g. "Steins;Gate 0" vs "Steins;Gate"),
-	// requiring the full target title or a multi-word prefix so single truncated words like "Mushoku" never score.
+	// Prefix fallback for same-franchise season subtitles (e.g. "Steins;Gate 0" vs "Steins;Gate",
+	// "Dr. Stone" vs "Dr. STONE: SCIENCE FUTURE Part 3"), requiring the full target title or a
+	// multi-word prefix (>= 6 chars) so single truncated words like "Mushoku" never score.
 	if (normGuess.length >= 5) {
 		for (const t of normTargets) {
 			if (
 				t.length >= 5 &&
 				(normGuess.startsWith(`${t} `) ||
-					(normGuess.includes(' ') && normGuess.length >= 10 && t.startsWith(`${normGuess} `)))
+					(normGuess.includes(' ') && normGuess.length >= 6 && t.startsWith(`${normGuess} `)))
 			) {
 				return 'franchise';
 			}

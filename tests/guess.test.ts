@@ -55,6 +55,7 @@ describe('POST /api/guess security & scoring invariants', () => {
 		expect(res.status).toBe(400);
 
 		const roundToken = sealPayload<SealedRoundSecret>({
+			typ: 'round',
 			v: 1,
 			roundId: 'round-1',
 			mode: 'daily',
@@ -82,6 +83,23 @@ describe('POST /api/guess security & scoring invariants', () => {
 			)
 		);
 		expect(badDaily.status).toBe(400);
+
+		// Cross-type token confusion (passing a daily state token as roundToken) must be rejected
+		const wrongTypeToken = sealPayload<SealedDailyState>({
+			typ: 'daily',
+			v: 1,
+			roundId: 'round-1',
+			dailyDate: '2026-11-27',
+			scopeKey: 'global',
+			playerId: 'player-1',
+			attemptsUsed: 0,
+			finished: false,
+			usedKeys: []
+		});
+		const crossType = await guessPost(
+			makeEvent({ roundToken: wrongTypeToken, guessedTitle: 'Steins;Gate', guessedEpisode: 1 })
+		);
+		expect(crossType.status).toBe(400);
 	});
 
 	it('enforces Daily attempt limit even if body username/statuses are altered or token is replayed', async () => {
@@ -91,6 +109,7 @@ describe('POST /api/guess security & scoring invariants', () => {
 		const scopeKey = 'user:4lajf:COMPLETED,CURRENT:0';
 
 		const roundToken = sealPayload<SealedRoundSecret>({
+			typ: 'round',
 			v: 1,
 			roundId,
 			mode: 'daily',
@@ -107,6 +126,7 @@ describe('POST /api/guess security & scoring invariants', () => {
 		});
 
 		const initialStateToken = sealPayload<SealedDailyState>({
+			typ: 'daily',
 			v: 1,
 			roundId,
 			dailyDate,
@@ -197,6 +217,7 @@ describe('POST /api/guess security & scoring invariants', () => {
 		);
 
 		const roundToken = sealPayload<SealedRoundSecret>({
+			typ: 'round',
 			v: 1,
 			roundId: 'classic-1',
 			mode: 'classic',

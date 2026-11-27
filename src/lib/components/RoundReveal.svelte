@@ -415,12 +415,10 @@
 		background: var(--lamp);
 	}
 
-	/* Episode Accuracy Ruler */
+	/* Episode Accuracy Ruler — dissolved card nesting, clean structural hairline */
 	.ruler-box {
-		background: var(--ink-2);
-		border: 1px solid var(--rule);
-		border-radius: var(--radius-md);
-		padding: 12px 14px;
+		border-top: 1px solid var(--rule);
+		padding-top: 14px;
 	}
 
 	.ruler-head {

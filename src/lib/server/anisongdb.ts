@@ -4,6 +4,7 @@ import { CURATED_GLOBAL_POOL } from '$lib/curated';
 
 const ANISONGDB_URL = 'https://anisongdb.com/api/anime_name_autocomplete';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const FAILURE_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes negative cache on cold outage
 const CACHE_FILE = join(process.cwd(), '.cache', 'anisongdb-titles.json');
 
 interface TitleCache {
@@ -13,6 +14,7 @@ interface TitleCache {
 
 let memoryCache: TitleCache | null = null;
 let inflight: Promise<string[]> | null = null;
+let lastFailedAt = 0;
 
 function dedupeAndSort(raw: unknown[]): string[] {
 	const set = new Set<string>();
@@ -104,6 +106,10 @@ export async function getCachedAnisongDbTitles(): Promise<{ titles: string[]; ca
 		return { titles: memoryCache.titles, cachedAt: memoryCache.fetchedAt };
 	}
 
+	if (!memoryCache && lastFailedAt > 0 && now - lastFailedAt < FAILURE_BACKOFF_MS) {
+		return { titles: getFallbackTitles(), cachedAt: 0 };
+	}
+
 	if (!inflight) {
 		inflight = fetchFromUpstream().finally(() => {
 			inflight = null;
@@ -112,8 +118,10 @@ export async function getCachedAnisongDbTitles(): Promise<{ titles: string[]; ca
 
 	try {
 		const titles = await inflight;
+		lastFailedAt = 0;
 		return { titles, cachedAt: memoryCache?.fetchedAt ?? Date.now() };
 	} catch {
+		lastFailedAt = Date.now();
 		const titles = getFallbackTitles();
 		return { titles, cachedAt: 0 };
 	}

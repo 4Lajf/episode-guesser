@@ -167,15 +167,15 @@
 		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 	}
 
-	/* Wide hero capped cleanly by viewport height so 16:9 never crops and console stays above fold */
+	/* Wide hero capped cleanly by viewport height so 16:9 never crops and downward dropdown fits */
 	.stage-shell {
 		position: relative;
-		width: min(100%, 920px, calc(max(360px, 100svh - 335px) * 16 / 9));
+		width: min(100%, 880px, calc(max(320px, 100svh - 365px) * 16 / 9));
 		padding: 8px;
 	}
 
 	.light-table.compact .stage-shell {
-		width: min(100%, calc(max(260px, 100svh - 350px) * 16 / 9));
+		width: min(100%, calc(max(260px, 100svh - 360px) * 16 / 9));
 		padding: 7px;
 	}
 
@@ -279,7 +279,7 @@
 	}
 
 	.table-footer {
-		width: min(100%, 920px, calc(max(360px, 100svh - 335px) * 16 / 9));
+		width: min(100%, 880px, calc(max(320px, 100svh - 365px) * 16 / 9));
 		padding: 0 8px;
 		display: flex;
 		align-items: center;
@@ -289,7 +289,7 @@
 	}
 
 	.light-table.compact .table-footer {
-		width: min(100%, calc(max(260px, 100svh - 350px) * 16 / 9));
+		width: min(100%, calc(max(260px, 100svh - 360px) * 16 / 9));
 		padding: 0 7px;
 	}
 

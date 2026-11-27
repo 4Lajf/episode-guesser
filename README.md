@@ -10,7 +10,7 @@ A SvelteKit anime episode screencap guessing game powered by **AniList**, **ani.
   - **Unlimited**: Endless frames with live streak and personal best tracking.
   - **Daily Frame-Wordle**: 5 attempts on one daily puzzle (seeded by UTC date + your AniList or the Global Pool). Starts tightly cropped (`2.2×`) via server-side image cropping and pulls back each miss (`2.2× → 1.6× → 1.3× → 1.1× → 1.0×`) with Anime / Year ↑↓ / Episode ↑↓ feedback tiles and a spoiler-free share card.
 - **Cached AnisongDB autocomplete**: Fetches `https://anisongdb.com/api/anime_name_autocomplete` with 24-hour in-memory + disk stale-while-revalidate caching.
-- **Anti-cheat by design**: Round answers and upstream image URLs are sealed inside AES-256-GCM server tokens; Daily zoom crops are generated server-side with `sharp`, and Daily attempts are tracked per session via an `httpOnly` cookie + sealed state token on the server.
+- **Server-side integrity**: Round answers and upstream image URLs are sealed inside AES-256-GCM server tokens; Daily zoom crops are cut server-side with `sharp`, and Daily attempts are tracked per anonymous browser session via an `httpOnly` cookie + sealed state token persisted to `/app/.cache/daily-store.json` (clearing cookies starts a fresh anonymous session, as expected for a login-free game).
 
 ## Local Development
 
@@ -35,4 +35,7 @@ pnpm build
 4. Add environment variables:
    - `SESSION_SECRET`: 32+ random hex characters (required so round/image tokens stay valid across restarts and redeploys)
    - `ORIGIN=https://episode-guesser.karczma.moe`
-5. *(Optional)* Mount a persistent volume at `/app/.cache` to keep the cached AnisongDB autocomplete list across container restarts.
+   - Client IP header for per-IP rate limiting:
+     - If proxied through **Cloudflare** (e.g. orange-cloud DNS for `karczma.moe`): set `ADDRESS_HEADER=cf-connecting-ip`
+     - If directly behind **Coolify Traefik** only: leave the default `ADDRESS_HEADER=x-forwarded-for` and `XFF_DEPTH=1` (or `XFF_DEPTH=2` for two proxy hops)
+5. **Required persistent storage**: Mount a persistent volume at `/app/.cache` so both **Daily Wordle session progress** (`daily-store.json`) and the **cached AnisongDB title list** survive container redeploys.

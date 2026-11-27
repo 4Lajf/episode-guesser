@@ -71,6 +71,14 @@ describe('normalizeTitle & matchAnimeTitle', () => {
 				[]
 			)
 		).toBe('exact');
+
+		// Multi-word franchise prefix >= 6 chars matches later seasons, while single truncated words score wrong
+		expect(matchAnimeTitle('Dr. Stone', ['Dr. STONE: SCIENCE FUTURE Part 3'], [])).toBe(
+			'franchise'
+		);
+		expect(matchAnimeTitle('Mushoku', ['Mushoku Tensei: Isekai Ittara Honki Dasu'], [])).toBe(
+			'wrong'
+		);
 	});
 });
 

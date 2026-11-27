@@ -145,7 +145,7 @@ export const GET: RequestHandler = async ({ params }) => {
 	}
 
 	const secret = unsealPayload<SealedImageSecret>(params.token);
-	if (!secret || !secret.url || secret.exp < Date.now()) {
+	if (!secret || secret.typ !== 'image' || !secret.url || secret.exp < Date.now()) {
 		throw error(404, 'Image token expired or invalid');
 	}
 

@@ -35,11 +35,11 @@
 	let titleQuery = $state('');
 	let episodeText = $state('1');
 	let dropdownOpen = $state(false);
-	let openUpward = $state(false);
 	let activeIndex = $state(0);
 
 	let titleInputEl = $state<HTMLInputElement | null>(null);
 	let episodeInputEl = $state<HTMLInputElement | null>(null);
+	let dropdownEl = $state<HTMLDivElement | null>(null);
 
 	// Precompute normalized titles once whenever title pool changes
 	const indexedTitles = $derived(
@@ -50,13 +50,14 @@
 		}))
 	);
 
-	function updateDropdownDirection() {
-		if (!titleInputEl || typeof window === 'undefined') return;
-		const rect = titleInputEl.getBoundingClientRect();
-		const spaceBelow = window.innerHeight - rect.bottom;
-		const spaceAbove = rect.top;
-		openUpward = spaceBelow < 240 && spaceAbove > spaceBelow;
-	}
+	// Keep the downward dropdown comfortably visible without ever covering the anime screencap
+	$effect(() => {
+		if (dropdownOpen && filteredTitles.length > 0) {
+			tick().then(() => {
+				dropdownEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+			});
+		}
+	});
 
 	// Reset inputs cleanly whenever a new round/attempt starts
 	$effect(() => {
@@ -164,14 +165,12 @@
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			if (filteredTitles.length > 0) {
-				updateDropdownDirection();
 				dropdownOpen = true;
 				activeIndex = (activeIndex + 1) % filteredTitles.length;
 			}
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			if (filteredTitles.length > 0) {
-				updateDropdownDirection();
 				dropdownOpen = true;
 				activeIndex = (activeIndex - 1 + filteredTitles.length) % filteredTitles.length;
 			}
@@ -255,11 +254,9 @@
 				disabled={disabled || submitting}
 				bind:value={titleQuery}
 				onfocus={() => {
-					updateDropdownDirection();
 					if (titleQuery.trim()) dropdownOpen = true;
 				}}
 				oninput={() => {
-					updateDropdownDirection();
 					dropdownOpen = titleQuery.trim().length > 0;
 					activeIndex = 0;
 				}}
@@ -287,9 +284,9 @@
 
 		{#if dropdownOpen && filteredTitles.length > 0}
 			<div
+				bind:this={dropdownEl}
 				id="anime-title-listbox"
 				class="dropdown"
-				class:upward={openUpward}
 				role="listbox"
 				aria-label="Anime title suggestions"
 			>
@@ -396,20 +393,18 @@
 </form>
 
 <style>
+	/* Dissolve redundant nested card: sit cleanly on the slate canvas under the Light Table */
 	.guess-console {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 196px auto;
 		gap: 12px;
 		align-items: end;
-		background: var(--ink-1);
-		border: 1px solid var(--rule);
-		border-radius: var(--radius-lg);
-		padding: 16px 18px;
+		padding: 4px 2px 0;
 	}
 
 	.guess-console.compact {
 		grid-template-columns: minmax(0, 1fr) 196px;
-		padding: 14px 16px;
+		padding: 4px 2px 0;
 		gap: 10px 12px;
 	}
 
@@ -506,7 +501,7 @@
 		color: var(--text);
 	}
 
-	/* Floating popover anchored to .title-field so upward never overlaps the label */
+	/* Always opens downward below the input so it NEVER covers the anime screencap */
 	.dropdown {
 		position: absolute;
 		left: 0;
@@ -516,16 +511,9 @@
 		background: var(--ink-1);
 		border: 1px solid var(--rule-strong);
 		border-radius: var(--radius-md);
-		max-height: 270px;
+		max-height: 240px;
 		overflow-y: auto;
 		box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
-	}
-
-	.dropdown.upward {
-		top: auto;
-		bottom: calc(100% + 6px);
-		max-height: 172px;
-		box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.6);
 	}
 
 	.dropdown-opt {
@@ -709,7 +697,7 @@
 		.guess-console,
 		.guess-console.compact {
 			grid-template-columns: 1fr;
-			padding: 14px;
+			padding: 4px 0 0;
 		}
 
 		.actions,

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EpisodeReveal, WordleAttemptFeedback } from '$lib/types';
 
@@ -19,10 +19,13 @@ export interface DailyServerRecord {
 
 const MAX_RECORDS = 10_000;
 const RECORD_TTL_MS = 36 * 60 * 60 * 1000;
-const STORE_FILE = join(process.cwd(), '.cache', 'daily-store.json');
+const STORE_DIR = join(process.cwd(), '.cache');
+const STORE_FILE = join(STORE_DIR, 'daily-store.json');
+const FLUSH_DELAY_MS = 1_500;
 
 const store = new Map<string, DailyServerRecord>();
 let hydrated = false;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function hydrateFromDisk(): void {
 	if (hydrated) return;
@@ -41,16 +44,27 @@ function hydrateFromDisk(): void {
 	}
 }
 
-function persistToDisk(): void {
+function flushToDiskNow(): void {
+	flushTimer = null;
 	try {
-		mkdirSync(join(process.cwd(), '.cache'), { recursive: true });
+		mkdirSync(STORE_DIR, { recursive: true });
 		const obj: Record<string, DailyServerRecord> = {};
 		for (const [k, v] of store) {
 			obj[k] = v;
 		}
-		writeFileSync(STORE_FILE, JSON.stringify(obj), 'utf8');
+		const tmpPath = `${STORE_FILE}.${process.pid}.tmp`;
+		writeFileSync(tmpPath, JSON.stringify(obj), 'utf8');
+		renameSync(tmpPath, STORE_FILE);
 	} catch {
 		// non-fatal
+	}
+}
+
+function schedulePersist(): void {
+	if (flushTimer) return;
+	flushTimer = setTimeout(flushToDiskNow, FLUSH_DELAY_MS);
+	if (typeof flushTimer === 'object' && 'unref' in flushTimer) {
+		flushTimer.unref();
 	}
 }
 
@@ -93,10 +107,14 @@ export function saveDailyRecord(playerId: string, record: DailyServerRecord): vo
 	pruneOld();
 	const key = makeKey(playerId, record.date, record.scopeKey);
 	store.set(key, { ...record, updatedAt: Date.now() });
-	persistToDisk();
+	schedulePersist();
 }
 
 export function clearDailyStoreForTests(): void {
+	if (flushTimer) {
+		clearTimeout(flushTimer);
+		flushTimer = null;
+	}
 	store.clear();
 	hydrated = true;
 }
