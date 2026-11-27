@@ -162,11 +162,8 @@
 				<span class="rounds-label">
 					Daily frame <b class="tnum">#{dailyPuzzleNumber ?? '—'}</b>
 				</span>
-				{#if dailyIsArchive}
-					<span class="ranked-pill archive-pill">Archive</span>
-					{#if dailyDate}
-						<span class="sub-note">{formatShortDate(dailyDate)}</span>
-					{/if}
+				{#if dailyIsArchive && dailyDate}
+					<span class="sub-note">{formatShortDate(dailyDate)}</span>
 				{/if}
 
 				<div class="day-nav" aria-label="Navigate Daily archive">
@@ -254,24 +251,6 @@
 	.sub-note {
 		font-size: 14px;
 		color: var(--text-3);
-	}
-
-	.ranked-pill {
-		display: inline-flex;
-		align-items: center;
-		height: 22px;
-		padding: 0 8px;
-		border-radius: 999px;
-		background: var(--blue-soft);
-		color: var(--blue);
-		font-size: 12px;
-		font-weight: 700;
-		letter-spacing: 0.01em;
-	}
-
-	.ranked-pill.archive-pill {
-		background: var(--yellow-soft);
-		color: var(--yellow);
 	}
 
 	.day-nav {
