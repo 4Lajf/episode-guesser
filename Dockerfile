@@ -25,7 +25,9 @@ COPY --from=builder --chown=node:node /app/build ./build
 COPY --from=builder --chown=node:node /app/package.json ./package.json
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 
-RUN mkdir -p /app/.cache && chown -R node:node /app/.cache
+RUN apk add --no-cache curl \
+  && mkdir -p /app/.cache \
+  && chown -R node:node /app/.cache
 VOLUME ["/app/.cache"]
 
 USER node
@@ -33,6 +35,6 @@ USER node
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
+  CMD curl -fsS http://127.0.0.1:3000/api/health >/dev/null || exit 1
 
 CMD ["node", "build"]
