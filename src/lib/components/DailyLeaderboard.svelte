@@ -42,17 +42,6 @@
 		});
 	}
 
-	function formatSolveTime(ms: number): string {
-		const sec = Math.max(1, Math.round(ms / 1000));
-		if (sec < 60) return `${sec}s`;
-		const m = Math.floor(sec / 60);
-		const s = sec % 60;
-		if (m < 60) return `${m}m ${String(s).padStart(2, '0')}s`;
-		const h = Math.floor(m / 60);
-		const rm = m % 60;
-		return `${h}h ${String(rm).padStart(2, '0')}m`;
-	}
-
 	function formatOutcome(entry: DailyLeaderboardEntry): string {
 		if (entry.won) {
 			const idx = Math.min(Math.max(0, entry.attemptsUsed - 1), WORDLE_ZOOM_STEPS.length - 1);
@@ -80,9 +69,9 @@
 			</h2>
 			<p class="lb-sub">
 				{#if leaderboard && leaderboard.totalPlayers > 0}
-					{leaderboard.totalPlayers} ranked {leaderboard.totalPlayers === 1 ? 'player' : 'players'} · {leaderboard.solvedCount} solved · Ranked by fewest guesses, then solve time
+					{leaderboard.totalPlayers} {leaderboard.totalPlayers === 1 ? 'player' : 'players'} · {leaderboard.solvedCount} solved
 				{:else}
-					Ranked Top 1,000 Daily · Fewer guesses and faster solve time rank higher
+					Ranked by fewest guesses
 				{/if}
 			</p>
 		</div>
@@ -105,9 +94,9 @@
 					<b>
 						{dailyWon
 							? `You solved today’s frame in ${dailyAttemptsCount}/${WORDLE_MAX_ATTEMPTS}!`
-							: 'Claim your ranked Daily entry!'}
+							: 'Claim your Daily leaderboard spot!'}
 					</b>
-					<span>Log in with AniList to post today’s result directly onto the Global Leaderboard.</span>
+					<span>Log in with AniList to post this result directly onto the Global Leaderboard.</span>
 				{:else}
 					<b>Compete on the Global Daily Leaderboard</b>
 					<span>Log in with AniList to rank your Daily solves against other anime fans worldwide.</span>
@@ -125,10 +114,10 @@
 	{:else if leaderboard?.me}
 		<div class="lb-me-banner">
 			<span>
-				Ranked <b class="tnum">#{leaderboard.me.rank}</b> of <span class="tnum">{leaderboard.totalPlayers}</span> today as <b>{authUser.username}</b>
+				Rank <b class="tnum">#{leaderboard.me.rank}</b> of <span class="tnum">{leaderboard.totalPlayers}</span> as <b>{authUser.username}</b>
 			</span>
 			<span class="lb-me-stat tnum">
-				{formatOutcome(leaderboard.me.entry)} · {formatSolveTime(leaderboard.me.entry.solveMs)}
+				{formatOutcome(leaderboard.me.entry)}
 			</span>
 		</div>
 	{/if}
@@ -170,9 +159,9 @@
 					<div class="lb-tiles" aria-hidden="true" title="Attempt pattern">
 						{#each entry.tiles as t, ti (ti)}
 							<span class="tile-row">
-								<i class="sq {t.a}"></i>
-								<i class="sq {t.y}"></i>
-								<i class="sq {t.e}"></i>
+								<i class="sq {t.g ? 'skip' : t.a}"></i>
+								<i class="sq {t.g ? 'skip' : t.y}"></i>
+								<i class="sq {t.g ? 'skip' : t.e}"></i>
 							</span>
 						{/each}
 					</div>
@@ -181,7 +170,6 @@
 						<span class="lb-outcome tnum" class:won={entry.won}>
 							{formatOutcome(entry)}
 						</span>
-						<span class="lb-time tnum">{formatSolveTime(entry.solveMs)}</span>
 					</div>
 				</li>
 			{/each}
@@ -432,25 +420,28 @@
 
 	.sq {
 		width: 6px;
-		height: 12px;
+		height: 13px;
 		border-radius: 1.5px;
 		display: block;
-		background: var(--ink-raised);
+		background: #df5b69;
+	}
+
+	.sq.miss {
+		background: #df5b69;
 	}
 
 	.sq.hit {
 		background: var(--green);
 	}
 
-	.sq.close {
+	.sq.close,
+	.sq.skip {
 		background: var(--yellow);
 	}
 
 	.lb-score {
 		display: flex;
-		flex-direction: column;
-		align-items: flex-end;
-		gap: 1px;
+		align-items: center;
 		white-space: nowrap;
 	}
 
@@ -462,11 +453,6 @@
 
 	.lb-outcome.won {
 		color: var(--green);
-	}
-
-	.lb-time {
-		font-size: 12px;
-		color: var(--text-3);
 	}
 
 	.lb-empty {

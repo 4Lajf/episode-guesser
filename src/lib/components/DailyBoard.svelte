@@ -537,15 +537,16 @@
 					<p class="answer-sub">{reveal.titleEnglish}</p>
 				{/if}
 				<p class="answer-ep">
-					Episode {reveal.episodeNumber}{#if reveal.episodeTitle}, “{reveal.episodeTitle}”{/if}{#if reveal.seasonYear}{' · '}{reveal.seasonYear}{/if}
+					Episode {reveal.episodeNumber}{#if reveal.episodeTitle}, “{reveal.episodeTitle.replace(/`/g, '’')}”{/if}{#if reveal.seasonYear}{' · '}{reveal.seasonYear}{/if}
 				</p>
 				<a
 					class="ext"
 					href={reveal.anilistUrl}
 					target="_blank"
 					rel="noopener noreferrer"
+					aria-label="View {reveal.titleRomaji} on AniList"
 				>
-					<span>{reveal.titleRomaji} on AniList</span>
+					<span>View on AniList</span>
 					<svg class="icon" viewBox="0 0 20 20" aria-hidden="true">
 						<path d="M8.5 5H5v10h10v-3.5M11.5 4H16v4.5M16 4l-7 7" />
 					</svg>
@@ -719,40 +720,67 @@
 								Copy image
 							{/if}
 						</button>
-						<button type="button" class="quiet" onclick={copyShareText}>
-							{copiedText ? 'Copied text' : 'Copy as text'}
+						<button type="button" class="outline" onclick={copyShareText}>
+							{copiedText ? 'Copied text' : 'Copy text'}
 						</button>
 					</div>
 
 					<div class="play-more">
-						{#if isArchive && canGoPrevDay && onPrevDay}
-							<button type="button" class="primary-next" onclick={onPrevDay}>
-								← Previous day
-							</button>
-						{/if}
-						{#if isArchive && canGoNextDay && onNextDay}
-							<button type="button" class="outline" onclick={onNextDay}>
-								Next day →
-							</button>
-						{/if}
-						{#if !isArchive && onOpenArchive}
-							<button type="button" class="primary-next" onclick={onOpenArchive}>
-								Play Archive (366 days)
-							</button>
-						{:else if isArchive && onGoToday}
-							<button type="button" class="quiet" onclick={onGoToday}>
-								Today’s Daily
-							</button>
-						{/if}
-						{#if onSwitchClassic}
-							<button type="button" class="quiet" onclick={onSwitchClassic}>
-								Play Classic
-							</button>
-						{/if}
-						{#if onSwitchUnlimited}
-							<button type="button" class="quiet" onclick={onSwitchUnlimited}>
-								Play Unlimited
-							</button>
+						{#if isArchive}
+							<div class="archive-nav-row">
+								{#if onPrevDay}
+									<button
+										type="button"
+										class="primary-next"
+										disabled={!canGoPrevDay}
+										onclick={onPrevDay}
+									>
+										← Previous day
+									</button>
+								{/if}
+								{#if onNextDay}
+									<button
+										type="button"
+										class="outline"
+										disabled={!canGoNextDay}
+										onclick={onNextDay}
+									>
+										Next day →
+									</button>
+								{/if}
+							</div>
+							<div class="mode-row">
+								{#if onGoToday}
+									<button type="button" class="quiet" onclick={onGoToday}>Today</button>
+								{/if}
+								{#if onOpenArchive}
+									<button type="button" class="quiet" onclick={onOpenArchive}>Archive</button>
+								{/if}
+								{#if onSwitchClassic}
+									<button type="button" class="quiet" onclick={onSwitchClassic}>Classic</button>
+								{/if}
+								{#if onSwitchUnlimited}
+									<button type="button" class="quiet" onclick={onSwitchUnlimited}>Unlimited</button>
+								{/if}
+							</div>
+						{:else}
+							<div class="mode-row three">
+								{#if onOpenArchive}
+									<button type="button" class="primary-next" onclick={onOpenArchive}>
+										Play Archive
+									</button>
+								{/if}
+								{#if onSwitchClassic}
+									<button type="button" class="outline" onclick={onSwitchClassic}>
+										Classic
+									</button>
+								{/if}
+								{#if onSwitchUnlimited}
+									<button type="button" class="outline" onclick={onSwitchUnlimited}>
+										Unlimited
+									</button>
+								{/if}
+							</div>
 						{/if}
 					</div>
 				</div>
@@ -1026,61 +1054,86 @@
 	}
 
 	.share-actions {
-		display: flex;
-		flex-wrap: wrap;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 8px;
 	}
 
 	.play-more {
 		display: flex;
-		flex-wrap: wrap;
+		flex-direction: column;
 		gap: 8px;
-		padding-top: 8px;
+		padding-top: 10px;
 		border-top: 1px solid var(--line-soft);
 	}
 
+	.archive-nav-row {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.mode-row {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.mode-row.three {
+		grid-template-columns: 1.25fr 1fr 1fr;
+	}
+
 	.primary-next {
-		height: 44px;
-		padding: 0 20px;
+		height: 42px;
+		padding: 0 14px;
 		border: 0;
 		border-radius: var(--r);
 		background: var(--paper);
 		color: var(--ink-deep);
-		font-size: 14.5px;
+		font-size: 14px;
 		font-weight: 750;
+		white-space: nowrap;
 		transition: background-color 120ms ease;
 	}
 
-	.primary-next:hover {
+	.primary-next:hover:not(:disabled) {
 		background: var(--paper-hover);
 	}
 
+	.primary-next:disabled,
+	.outline:disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
+
 	.outline {
-		height: 44px;
-		padding: 0 18px;
+		height: 42px;
+		padding: 0 12px;
 		border-radius: var(--r);
 		border: 1.5px solid var(--line-strong);
 		background: none;
 		color: var(--paper);
-		font-size: 14.5px;
+		font-size: 14px;
 		font-weight: 650;
+		white-space: nowrap;
 		transition: border-color 120ms ease, background-color 120ms ease;
 	}
 
-	.outline:hover {
+	.outline:hover:not(:disabled) {
 		border-color: var(--paper);
 		background: var(--ink-raised);
 	}
 
 	.quiet {
-		height: 44px;
-		padding: 0 16px;
+		height: 38px;
+		padding: 0 10px;
 		border: 0;
 		border-radius: var(--r);
 		background: none;
 		color: var(--text-2);
-		font-size: 14.5px;
+		font-size: 13.5px;
 		font-weight: 600;
+		white-space: nowrap;
 		transition: background-color 120ms ease, color 120ms ease;
 	}
 

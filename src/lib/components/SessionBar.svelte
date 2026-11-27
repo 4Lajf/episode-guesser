@@ -162,13 +162,11 @@
 				<span class="rounds-label">
 					Daily frame <b class="tnum">#{dailyPuzzleNumber ?? '—'}</b>
 				</span>
-				<span class="ranked-pill" class:archive-pill={dailyIsArchive}>
-					{dailyIsArchive ? 'Archive' : 'Ranked'}
-				</span>
-				{#if dailyIsArchive && dailyDate}
-					<span class="sub-note">{formatShortDate(dailyDate)}</span>
-				{:else if dailyScopeLabel}
-					<span class="sub-note">{dailyScopeLabel}</span>
+				{#if dailyIsArchive}
+					<span class="ranked-pill archive-pill">Archive</span>
+					{#if dailyDate}
+						<span class="sub-note">{formatShortDate(dailyDate)}</span>
+					{/if}
 				{/if}
 
 				<div class="day-nav" aria-label="Navigate Daily archive">

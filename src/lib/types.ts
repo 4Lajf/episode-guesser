@@ -38,6 +38,7 @@ export interface LeaderboardAttemptSummary {
 	a: TileStatus;
 	y: TileStatus;
 	e: TileStatus;
+	g?: boolean;
 }
 
 export interface DailyLeaderboardEntry {

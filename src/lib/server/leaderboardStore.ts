@@ -205,7 +205,8 @@ export function recordDailyLeaderboardResult(params: {
 		tiles: params.attempts.map((a) => ({
 			a: a.animeStatus,
 			y: a.yearStatus,
-			e: a.episodeStatus
+			e: a.episodeStatus,
+			...(a.gaveUp ? { g: true } : {})
 		}))
 	};
 

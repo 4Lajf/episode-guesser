@@ -186,6 +186,22 @@ describe('evaluateWordleAttempt & share text', () => {
 		expect(miss.episodeDirection).toBe('down');
 		expect(miss.solved).toBe(false);
 
+		// Close episode number (within threshold) marks episodeStatus 'close' even before anime matches
+		const closeEpWrongAnime = evaluateWordleAttempt({
+			attemptNumber: 1,
+			guessedTitle: 'Mushoku Tensei',
+			guessedEpisode: 12,
+			guessedYear: 2021,
+			targetTitles: ['Sousou no Frieren'],
+			franchiseTitles: [],
+			actualEpisode: 11,
+			actualYear: 2026,
+			totalEpisodes: 12
+		});
+		expect(closeEpWrongAnime.animeStatus).toBe('miss');
+		expect(closeEpWrongAnime.episodeStatus).toBe('close');
+		expect(closeEpWrongAnime.episodeDirection).toBe('down');
+
 		const exact = evaluateWordleAttempt({
 			attemptNumber: 2,
 			guessedTitle: 'Sousou no Frieren',

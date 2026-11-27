@@ -1066,7 +1066,7 @@
 		<div class="shell nudge-wrap">
 			<div class="anilist-nudge">
 				<span class="nudge-copy">
-					Daily frame is <b>Ranked (Top 1,000)</b>. Log in with AniList to join the Global Leaderboard or switch Classic &amp; Unlimited to Top 249 / your own list.
+					Log in with AniList to join the Global Daily Leaderboard, or switch Classic &amp; Unlimited to Top 249 / your own list.
 				</span>
 				<div class="nudge-actions">
 					{#if authConfigured}

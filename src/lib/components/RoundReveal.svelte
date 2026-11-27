@@ -117,7 +117,7 @@
 			<p class="subtitle">{result.reveal.titleEnglish}</p>
 		{/if}
 		<p class="eptitle">
-			Episode {result.reveal.episodeNumber}{#if result.reveal.episodeTitle}, “{result.reveal.episodeTitle}”{/if}
+			Episode {result.reveal.episodeNumber}{#if result.reveal.episodeTitle}, “{result.reveal.episodeTitle.replace(/`/g, '’')}”{/if}
 		</p>
 	</div>
 
@@ -237,8 +237,9 @@
 		href={result.reveal.anilistUrl}
 		target="_blank"
 		rel="noopener noreferrer"
+		aria-label="View {result.reveal.titleRomaji} on AniList"
 	>
-		<span>{result.reveal.titleRomaji} on AniList</span>
+		<span>View on AniList</span>
 		<svg class="icon" viewBox="0 0 20 20" aria-hidden="true">
 			<path d="M8.5 5H5v10h10v-3.5M11.5 4H16v4.5M16 4l-7 7" />
 		</svg>

@@ -258,7 +258,7 @@ export function evaluateWordleAttempt(params: {
 			episodeStatus = 'close';
 			episodeDirection = 'exact';
 		} else {
-			episodeStatus = 'miss';
+			episodeStatus = Math.abs(epDiff) <= closeThreshold ? 'close' : 'miss';
 			episodeDirection = epDiff > 0 ? 'up' : 'down';
 		}
 	}

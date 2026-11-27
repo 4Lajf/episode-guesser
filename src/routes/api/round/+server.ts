@@ -61,7 +61,7 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 
 	try {
 		let pool = mode === 'daily' ? CURATED_GLOBAL_POOL : getGlobalPool(globalPoolSize);
-		const scopeLabel = 'Ranked · Top 1,000';
+		const scopeLabel = 'Global Daily';
 		const scopeKey = 'global';
 		const seedKey = 'global';
 
@@ -89,7 +89,7 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 			targetDate = cleanDate;
 		}
 		const isArchive = targetDate !== todayUtc;
-		const effectiveScopeLabel = isArchive ? 'Archive · Top 1,000' : scopeLabel;
+		const effectiveScopeLabel = isArchive ? 'Archive' : scopeLabel;
 
 		// Server-enforced Daily session: restore existing in-progress/completed record instead of minting a fresh reset.
 		// Zero-attempt sessions are NOT persisted until the player submits their first guess, preventing
