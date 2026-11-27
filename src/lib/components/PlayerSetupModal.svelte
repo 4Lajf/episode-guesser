@@ -34,19 +34,44 @@
 	let statuses = $state<ListStatus[]>(['COMPLETED', 'CURRENT']);
 	let includeSingleEp = $state(false);
 	let usernameInputEl = $state<HTMLInputElement | null>(null);
+	let cardEl = $state<HTMLDivElement | null>(null);
+	let previouslyFocused: HTMLElement | null = null;
 
 	$effect(() => {
 		if (open) {
+			previouslyFocused = document.activeElement as HTMLElement | null;
 			usernameInput = initialUsername;
 			statuses = [...initialStatuses];
 			includeSingleEp = initialIncludeSingleEp;
 			tick().then(() => usernameInputEl?.focus());
+		} else if (previouslyFocused) {
+			previouslyFocused.focus();
+			previouslyFocused = null;
 		}
 	});
 
 	function handleWindowKeydown(e: KeyboardEvent) {
-		if (open && canDismiss && e.key === 'Escape') {
+		if (!open) return;
+		if (canDismiss && e.key === 'Escape') {
 			onClose();
+			return;
+		}
+		if (e.key === 'Tab' && cardEl) {
+			const focusables = Array.from(
+				cardEl.querySelectorAll<HTMLElement>(
+					'button:not(:disabled), input:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])'
+				)
+			);
+			if (focusables.length === 0) return;
+			const first = focusables[0];
+			const last = focusables[focusables.length - 1];
+			if (e.shiftKey && document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
+			}
 		}
 	}
 
@@ -87,7 +112,12 @@
 		onclick={() => canDismiss && onClose()}
 		onkeydown={(e) => canDismiss && e.key === 'Escape' && onClose()}
 	>
-		<div class="modal-card" onclick={(e) => e.stopPropagation()} role="presentation">
+		<div
+			bind:this={cardEl}
+			class="modal-card"
+			onclick={(e) => e.stopPropagation()}
+			role="presentation"
+		>
 			<div class="modal-head">
 				<div>
 					<h2 id="setup-modal-title" class="modal-title font-display">Load your AniList</h2>

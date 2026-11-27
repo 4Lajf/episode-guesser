@@ -10,8 +10,14 @@ interface CachedEntry<T> {
 	expiresAt: number;
 }
 
+export interface AnimeLookupResult {
+	id: number;
+	year: number | null;
+	relatedIds: number[];
+}
+
 const profileCache = new Map<string, CachedEntry<AniListProfile>>();
-const titleYearCache = new Map<string, CachedEntry<number | null>>();
+const titleLookupCache = new Map<string, CachedEntry<AnimeLookupResult | null>>();
 
 const USER_LIST_QUERY = `
 query ($userName: String!, $statuses: [MediaListStatus]) {
@@ -70,9 +76,10 @@ query ($userName: String!, $statuses: [MediaListStatus]) {
 }
 `;
 
-const TITLE_YEAR_QUERY = `
+const TITLE_LOOKUP_QUERY = `
 query ($search: String!) {
   Media(search: $search, type: ANIME) {
+    id
     seasonYear
     startDate {
       year
@@ -83,6 +90,15 @@ query ($search: String!) {
       native
     }
     synonyms
+    relations {
+      edges {
+        relationType
+        node {
+          id
+          type
+        }
+      }
+    }
   }
 }
 `;
@@ -310,11 +326,11 @@ export async function fetchAniListProfile(params: {
 	}
 }
 
-export async function lookupAnimeYearByTitle(title: string): Promise<number | null> {
+export async function lookupAnimeByTitle(title: string): Promise<AnimeLookupResult | null> {
 	const normQuery = normalizeTitle(title);
 	if (!normQuery) return null;
 
-	const cached = titleYearCache.get(normQuery);
+	const cached = titleLookupCache.get(normQuery);
 	if (cached && cached.expiresAt > Date.now()) {
 		return cached.data;
 	}
@@ -326,7 +342,7 @@ export async function lookupAnimeYearByTitle(title: string): Promise<number | nu
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
 			body: JSON.stringify({
-				query: TITLE_YEAR_QUERY,
+				query: TITLE_LOOKUP_QUERY,
 				variables: { search: title.trim() }
 			}),
 			signal: controller.signal
@@ -335,17 +351,23 @@ export async function lookupAnimeYearByTitle(title: string): Promise<number | nu
 		const json = (await res.json()) as {
 			data?: {
 				Media?: {
+					id: number;
 					seasonYear?: number | null;
 					startDate?: { year?: number | null };
 					title?: { romaji?: string | null; english?: string | null; native?: string | null };
 					synonyms?: string[] | null;
+					relations?: {
+						edges?: Array<{
+							relationType: string;
+							node?: { id: number; type: string } | null;
+						}>;
+					} | null;
 				};
 			};
 		};
 		const media = json.data?.Media;
-		if (!media) return null;
+		if (!media?.id) return null;
 
-		// Verify the returned AniList entry actually corresponds to the guessed title
 		const candidates = [
 			media.title?.romaji,
 			media.title?.english,
@@ -356,16 +378,32 @@ export async function lookupAnimeYearByTitle(title: string): Promise<number | nu
 			.map(normalizeTitle);
 
 		const matches = candidates.some(
-			(c) => c === normQuery || (normQuery.length >= 4 && (c.includes(normQuery) || normQuery.includes(c)))
+			(c) =>
+				c === normQuery ||
+				(normQuery.length >= 4 && (c.includes(normQuery) || normQuery.includes(c)))
 		);
-		const year = matches ? (media.seasonYear ?? media.startDate?.year ?? null) : null;
 
-		if (titleYearCache.size > 500) {
-			const first = titleYearCache.keys().next().value;
-			if (first) titleYearCache.delete(first);
+		let result: AnimeLookupResult | null = null;
+		if (matches) {
+			const relatedIds: number[] = [];
+			for (const edge of media.relations?.edges ?? []) {
+				if (edge.node?.type === 'ANIME' && FRANCHISE_RELATIONS.has(edge.relationType)) {
+					relatedIds.push(edge.node.id);
+				}
+			}
+			result = {
+				id: media.id,
+				year: media.seasonYear ?? media.startDate?.year ?? null,
+				relatedIds
+			};
 		}
-		titleYearCache.set(normQuery, { data: year, expiresAt: Date.now() + YEAR_TTL_MS });
-		return year;
+
+		if (titleLookupCache.size > 500) {
+			const first = titleLookupCache.keys().next().value;
+			if (first) titleLookupCache.delete(first);
+		}
+		titleLookupCache.set(normQuery, { data: result, expiresAt: Date.now() + YEAR_TTL_MS });
+		return result;
 	} catch {
 		return null;
 	} finally {

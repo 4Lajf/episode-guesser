@@ -16,7 +16,8 @@ const DAILY_EPOCH_MS = Date.UTC(2026, 0, 1);
 /**
  * Normalizes an anime title for fair comparison across AniList, AnisongDB, and ani.zip.
  * Handles backticks (ani.zip quirk), smart quotes, diacritics, Unicode × vs x,
- * trailing year parentheticals like "(2011)", punctuation, and case.
+ * Japanese romanization variants (wo↔o, ou/oo→o, uu→u), trailing year parentheticals
+ * like "(2011)", punctuation, and case.
  */
 export function normalizeTitle(raw: string): string {
 	return raw
@@ -29,7 +30,11 @@ export function normalizeTitle(raw: string): string {
 		.replace(/[^\p{L}\p{N}]+/gu, ' ')
 		.replace(/\s+/g, ' ')
 		.trim()
-		.toLowerCase();
+		.toLowerCase()
+		.replace(/\bwo\b/g, 'o')
+		.replace(/ou/g, 'o')
+		.replace(/oo/g, 'o')
+		.replace(/uu/g, 'u');
 }
 
 export function matchAnimeTitle(

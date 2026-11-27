@@ -40,10 +40,14 @@ export interface RoundPayload {
 		date: string;
 		puzzleNumber: number;
 		scopeLabel: string;
-		originX: number;
-		originY: number;
 		maxAttempts: number;
 		zoomSteps: number[];
+	};
+	dailyRestore?: {
+		attempts: WordleAttemptFeedback[];
+		finished: boolean;
+		won: boolean;
+		reveal?: EpisodeReveal;
 	};
 }
 

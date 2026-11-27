@@ -3,11 +3,19 @@ import { CURATED_GLOBAL_POOL } from '$lib/curated';
 import {
 	evaluateClassicGuess,
 	evaluateWordleAttempt,
+	getTodayUtcDate,
+	matchAnimeTitle,
 	normalizeTitle,
 	WORDLE_MAX_ATTEMPTS,
 	WORDLE_ZOOM_STEPS
 } from '$lib/scoring';
-import { fetchAniListProfile, lookupAnimeYearByTitle, sanitizeStatuses } from '$lib/server/anilist';
+import {
+	fetchAniListProfile,
+	lookupAnimeByTitle,
+	sanitizeStatuses,
+	type AnimeLookupResult
+} from '$lib/server/anilist';
+import { getDailyRecord, saveDailyRecord } from '$lib/server/dailyStore';
 import {
 	mintImageUrl,
 	type SealedDailyState,
@@ -17,9 +25,10 @@ import { sealPayload, unsealPayload } from '$lib/server/token';
 import type { ListStatus, WordleGuessResponse } from '$lib/types';
 import type { RequestHandler } from './$types';
 
-const ROUND_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const ROUND_TTL_MS = 36 * 60 * 60 * 1000; // 36 hours
+const PLAYER_COOKIE = 'eg_pid';
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, cookies }) => {
 	let body: {
 		roundToken?: string;
 		dailyStateToken?: string;
@@ -54,6 +63,27 @@ export const POST: RequestHandler = async ({ request }) => {
 	const guessedEpisode =
 		parsedEp !== null && Number.isFinite(parsedEp) && parsedEp >= 1 ? Math.round(parsedEp) : null;
 
+	// Helper: enrich target/franchise titles via AniList ID lookup if normalized strings didn't match
+	async function resolveAniListFallback(
+		currentTargets: string[],
+		currentFranchise: string[]
+	): Promise<{ targets: string[]; franchise: string[]; lookup?: AnimeLookupResult | null }> {
+		if (!guessedTitle) return { targets: currentTargets, franchise: currentFranchise };
+		const direct = matchAnimeTitle(guessedTitle, currentTargets, currentFranchise);
+		if (direct === 'exact') return { targets: currentTargets, franchise: currentFranchise };
+
+		const lookup = await lookupAnimeByTitle(guessedTitle);
+		if (!lookup) return { targets: currentTargets, franchise: currentFranchise, lookup: null };
+
+		if (lookup.id === secret!.reveal.anilistId) {
+			return { targets: [...currentTargets, guessedTitle], franchise: currentFranchise, lookup };
+		}
+		if (lookup.relatedIds.includes(secret!.reveal.anilistId)) {
+			return { targets: currentTargets, franchise: [...currentFranchise, guessedTitle], lookup };
+		}
+		return { targets: currentTargets, franchise: currentFranchise, lookup };
+	}
+
 	// Classic / Unlimited evaluation
 	if (secret.mode === 'classic' || secret.mode === 'unlimited') {
 		const skipped = Boolean(body.skipped);
@@ -64,20 +94,24 @@ export const POST: RequestHandler = async ({ request }) => {
 			);
 		}
 
+		const resolved = skipped
+			? { targets: secret.targetTitles, franchise: secret.franchiseTitles }
+			: await resolveAniListFallback(secret.targetTitles, secret.franchiseTitles);
+
 		const result = evaluateClassicGuess({
 			mode: secret.mode,
 			guessedTitle,
 			guessedEpisode,
 			skipped,
-			targetTitles: secret.targetTitles,
-			franchiseTitles: secret.franchiseTitles,
+			targetTitles: resolved.targets,
+			franchiseTitles: resolved.franchise,
 			reveal: secret.reveal
 		});
 
 		return json(result);
 	}
 
-	// Daily Wordle evaluation — strictly verified via sealed dailyStateToken
+	// Daily Wordle evaluation — strictly verified via sealed dailyStateToken + server cookie record
 	if (!body.dailyStateToken || typeof body.dailyStateToken !== 'string') {
 		return json({ error: 'Missing Daily session state. Reload the daily frame.' }, { status: 400 });
 	}
@@ -85,6 +119,25 @@ export const POST: RequestHandler = async ({ request }) => {
 	const dailyState = unsealPayload<SealedDailyState>(body.dailyStateToken);
 	if (!dailyState || dailyState.v !== 1 || dailyState.roundId !== secret.roundId) {
 		return json({ error: 'Daily session mismatch. Reload the daily frame.' }, { status: 400 });
+	}
+
+	const playerId = cookies.get(PLAYER_COOKIE);
+	const todayUtc = getTodayUtcDate();
+	const cleanStatuses = sanitizeStatuses(body.statuses);
+	const includeSingleEp = Boolean(body.includeSingleEp);
+	const scopeKey = body.username
+		? `user:${body.username.trim().toLowerCase()}:${cleanStatuses.slice().sort().join(',')}:${includeSingleEp ? '1' : '0'}`
+		: 'global';
+
+	const serverRecord = playerId ? getDailyRecord(playerId, todayUtc, scopeKey) : null;
+	if (serverRecord && serverRecord.roundId === secret.roundId) {
+		if (serverRecord.finished || serverRecord.attempts.length >= WORDLE_MAX_ATTEMPTS) {
+			return json({ error: 'This daily puzzle is already finished.' }, { status: 400 });
+		}
+		// Reject stale replayed state tokens
+		if (dailyState.attemptsUsed !== serverRecord.attempts.length) {
+			return json({ error: 'Daily session out of sync. Reloading latest state.' }, { status: 409 });
+		}
 	}
 
 	if (dailyState.finished || dailyState.attemptsUsed >= WORDLE_MAX_ATTEMPTS) {
@@ -103,20 +156,39 @@ export const POST: RequestHandler = async ({ request }) => {
 			usedKeys: dailyState.usedKeys
 		});
 
+		const giveUpAttempt = {
+			attemptNumber,
+			guessedTitle: 'Gave up',
+			guessedEpisode: 0,
+			guessedYear: null,
+			animeStatus: 'miss' as const,
+			yearStatus: 'miss' as const,
+			yearDirection: null,
+			episodeStatus: 'miss' as const,
+			episodeDirection: null,
+			solved: false
+		};
+
+		if (playerId) {
+			saveDailyRecord(playerId, {
+				date: todayUtc,
+				scopeKey,
+				roundId: secret.roundId,
+				roundToken: body.roundToken,
+				dailyStateToken: nextStateToken,
+				currentImageUrl: secret.reveal.imageUrl,
+				attempts: [...(serverRecord?.attempts ?? []), giveUpAttempt],
+				usedKeys: dailyState.usedKeys,
+				finished: true,
+				won: false,
+				reveal: secret.reveal,
+				updatedAt: Date.now()
+			});
+		}
+
 		const res: WordleGuessResponse = {
 			mode: 'daily',
-			attempt: {
-				attemptNumber,
-				guessedTitle: 'Gave up',
-				guessedEpisode: 0,
-				guessedYear: null,
-				animeStatus: 'miss',
-				yearStatus: 'miss',
-				yearDirection: null,
-				episodeStatus: 'miss',
-				episodeDirection: null,
-				solved: false
-			},
+			attempt: giveUpAttempt,
 			finished: true,
 			won: false,
 			dailyStateToken: nextStateToken,
@@ -132,26 +204,33 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	const normGuess = normalizeTitle(guessedTitle);
 	const guessKey = `${normGuess}#${guessedEpisode}`;
-	if (dailyState.usedKeys.includes(guessKey)) {
+	const usedKeys = serverRecord?.roundId === secret.roundId ? serverRecord.usedKeys : dailyState.usedKeys;
+	if (usedKeys.includes(guessKey)) {
 		return json(
 			{ error: `You already tried "${guessedTitle}" episode ${guessedEpisode}.` },
 			{ status: 400 }
 		);
 	}
 
+	const resolved = await resolveAniListFallback(secret.targetTitles, secret.franchiseTitles);
+
 	// Resolve guessed anime's release year
 	let guessedYear: number | null = null;
 
-	if (secret.targetTitles.some((t) => normalizeTitle(t) === normGuess)) {
+	if (resolved.targets.some((t) => normalizeTitle(t) === normGuess)) {
 		guessedYear = secret.reveal.seasonYear;
+	}
+
+	if (guessedYear === null && resolved.lookup?.year) {
+		guessedYear = resolved.lookup.year;
 	}
 
 	if (guessedYear === null && body.username) {
 		try {
 			const profile = await fetchAniListProfile({
 				username: body.username,
-				statuses: sanitizeStatuses(body.statuses),
-				includeSingleEp: Boolean(body.includeSingleEp)
+				statuses: cleanStatuses,
+				includeSingleEp
 			});
 			const found = profile.pool.find(
 				(item) =>
@@ -174,8 +253,9 @@ export const POST: RequestHandler = async ({ request }) => {
 		if (curatedHit?.seasonYear) guessedYear = curatedHit.seasonYear;
 	}
 
-	if (guessedYear === null) {
-		guessedYear = await lookupAnimeYearByTitle(guessedTitle);
+	if (guessedYear === null && resolved.lookup === undefined) {
+		const looked = await lookupAnimeByTitle(guessedTitle);
+		if (looked?.year) guessedYear = looked.year;
 	}
 
 	const attempt = evaluateWordleAttempt({
@@ -183,24 +263,24 @@ export const POST: RequestHandler = async ({ request }) => {
 		guessedTitle,
 		guessedEpisode,
 		guessedYear,
-		targetTitles: secret.targetTitles,
-		franchiseTitles: secret.franchiseTitles,
+		targetTitles: resolved.targets,
+		franchiseTitles: resolved.franchise,
 		actualEpisode: secret.reveal.episodeNumber,
 		actualYear: secret.reveal.seasonYear,
 		totalEpisodes: secret.reveal.totalEpisodes
 	});
 
 	const finished = attempt.solved || attemptNumber >= WORDLE_MAX_ATTEMPTS;
+	const nextUsedKeys = [...usedKeys, guessKey];
 
 	const nextStateToken = sealPayload<SealedDailyState>({
 		v: 1,
 		roundId: secret.roundId,
 		attemptsUsed: attemptNumber,
 		finished,
-		usedKeys: [...dailyState.usedKeys, guessKey]
+		usedKeys: nextUsedKeys
 	});
 
-	// Mint the next server-cropped image URL (or full uncropped frame when finished)
 	let nextImageUrl: string;
 	if (finished) {
 		nextImageUrl = secret.reveal.imageUrl;
@@ -214,6 +294,23 @@ export const POST: RequestHandler = async ({ request }) => {
 						originX: secret.originX,
 						originY: secret.originY
 					});
+	}
+
+	if (playerId) {
+		saveDailyRecord(playerId, {
+			date: todayUtc,
+			scopeKey,
+			roundId: secret.roundId,
+			roundToken: body.roundToken,
+			dailyStateToken: nextStateToken,
+			currentImageUrl: nextImageUrl,
+			attempts: [...(serverRecord?.attempts ?? []), attempt],
+			usedKeys: nextUsedKeys,
+			finished,
+			won: attempt.solved,
+			...(finished ? { reveal: secret.reveal } : {}),
+			updatedAt: Date.now()
+		});
 	}
 
 	const response: WordleGuessResponse = {

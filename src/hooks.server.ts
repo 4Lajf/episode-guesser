@@ -5,57 +5,82 @@ interface Bucket {
 	lastRefill: number;
 }
 
-const RATE_LIMITED_PATHS = ['/api/round', '/api/anilist', '/api/guess'];
-const BUCKET_CAPACITY = 30;
-const REFILL_PER_SEC = 1.2; // 72 requests/min sustained, 30 burst per IP
-const buckets = new Map<string, Bucket>();
+interface LimitConfig {
+	capacity: number;
+	refillPerSec: number;
+}
 
-function consumeToken(ip: string): { allowed: boolean; retryAfterSec: number } {
+const API_LIMIT: LimitConfig = { capacity: 30, refillPerSec: 1.2 };
+const IMAGE_LIMIT: LimitConfig = { capacity: 90, refillPerSec: 3.0 };
+
+const apiBuckets = new Map<string, Bucket>();
+const imageBuckets = new Map<string, Bucket>();
+
+function consumeToken(
+	map: Map<string, Bucket>,
+	ip: string,
+	cfg: LimitConfig
+): { allowed: boolean; retryAfterSec: number } {
 	const now = Date.now();
-	let bucket = buckets.get(ip);
+	let bucket = map.get(ip);
 
 	if (!bucket) {
-		bucket = { tokens: BUCKET_CAPACITY, lastRefill: now };
+		bucket = { tokens: cfg.capacity, lastRefill: now };
 	} else {
 		const elapsedSec = (now - bucket.lastRefill) / 1000;
-		bucket.tokens = Math.min(BUCKET_CAPACITY, bucket.tokens + elapsedSec * REFILL_PER_SEC);
+		bucket.tokens = Math.min(cfg.capacity, bucket.tokens + elapsedSec * cfg.refillPerSec);
 		bucket.lastRefill = now;
 	}
 
 	if (bucket.tokens < 1) {
-		buckets.set(ip, bucket);
-		const retryAfterSec = Math.ceil((1 - bucket.tokens) / REFILL_PER_SEC);
+		map.set(ip, bucket);
+		const retryAfterSec = Math.ceil((1 - bucket.tokens) / cfg.refillPerSec);
 		return { allowed: false, retryAfterSec };
 	}
 
 	bucket.tokens -= 1;
-	if (buckets.size > 5000) {
-		const oldest = buckets.keys().next().value;
-		if (oldest) buckets.delete(oldest);
+	if (map.size > 5000) {
+		const oldest = map.keys().next().value;
+		if (oldest) map.delete(oldest);
 	}
-	buckets.set(ip, bucket);
+	map.set(ip, bucket);
 	return { allowed: true, retryAfterSec: 0 };
+}
+
+function getTrustedClientIp(event: Parameters<Handle>[0]['event']): string {
+	// Rely on @sveltejs/adapter-node's ADDRESS_HEADER + XFF_DEPTH (configured in Dockerfile)
+	// rather than reading an untrusted leftmost X-Forwarded-For value.
+	try {
+		return event.getClientAddress() || 'unknown';
+	} catch {
+		return 'unknown';
+	}
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const pathname = event.url.pathname;
-	if (RATE_LIMITED_PATHS.some((p) => pathname.startsWith(p))) {
-		const forwarded = event.request.headers.get('x-forwarded-for');
-		const ip =
-			forwarded?.split(',')[0]?.trim() ||
-			event.request.headers.get('cf-connecting-ip') ||
-			event.getClientAddress() ||
-			'unknown';
 
-		const { allowed, retryAfterSec } = consumeToken(ip);
+	if (
+		pathname.startsWith('/api/round') ||
+		pathname.startsWith('/api/anilist') ||
+		pathname.startsWith('/api/guess')
+	) {
+		const ip = getTrustedClientIp(event);
+		const { allowed, retryAfterSec } = consumeToken(apiBuckets, ip, API_LIMIT);
 		if (!allowed) {
 			return json(
 				{ error: 'Too many requests. Wait a moment and try again.' },
-				{
-					status: 429,
-					headers: { 'retry-after': String(retryAfterSec) }
-				}
+				{ status: 429, headers: { 'retry-after': String(retryAfterSec) } }
 			);
+		}
+	} else if (pathname.startsWith('/api/image/')) {
+		const ip = getTrustedClientIp(event);
+		const { allowed, retryAfterSec } = consumeToken(imageBuckets, ip, IMAGE_LIMIT);
+		if (!allowed) {
+			return new Response('Too many image requests', {
+				status: 429,
+				headers: { 'retry-after': String(retryAfterSec) }
+			});
 		}
 	}
 

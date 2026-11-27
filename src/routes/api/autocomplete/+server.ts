@@ -9,7 +9,10 @@ export const GET: RequestHandler = async ({ url, setHeaders }) => {
 	const limit = Number.isFinite(limitParam) ? Math.min(Math.max(1, limitParam), 100) : 25;
 
 	setHeaders({
-		'cache-control': 'public, max-age=3600, stale-while-revalidate=86400'
+		'cache-control':
+			cachedAt > 0
+				? 'public, max-age=3600, stale-while-revalidate=86400'
+				: 'no-store'
 	});
 
 	if (q) {

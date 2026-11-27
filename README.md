@@ -10,7 +10,7 @@ A SvelteKit anime episode screencap guessing game powered by **AniList**, **ani.
   - **Unlimited**: Endless frames with live streak and personal best tracking.
   - **Daily Frame-Wordle**: 5 attempts on one daily puzzle (seeded by UTC date + your AniList or the Global Pool). Starts tightly cropped (`2.2×`) via server-side image cropping and pulls back each miss (`2.2× → 1.6× → 1.3× → 1.1× → 1.0×`) with Anime / Year ↑↓ / Episode ↑↓ feedback tiles and a spoiler-free share card.
 - **Cached AnisongDB autocomplete**: Fetches `https://anisongdb.com/api/anime_name_autocomplete` with 24-hour in-memory + disk stale-while-revalidate caching.
-- **Anti-cheat by design**: Round answers and upstream image URLs are sealed inside AES-256-GCM server tokens; Daily zoom crops are generated server-side with `sharp` and Daily attempt state is verified via a sealed server token.
+- **Anti-cheat by design**: Round answers and upstream image URLs are sealed inside AES-256-GCM server tokens; Daily zoom crops are generated server-side with `sharp`, and Daily attempts are tracked per session via an `httpOnly` cookie + sealed state token on the server.
 
 ## Local Development
 

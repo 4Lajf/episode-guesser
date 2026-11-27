@@ -9,16 +9,26 @@
 
 	let { open, imageUrl, onClose }: Props = $props();
 	let closeBtnEl = $state<HTMLButtonElement | null>(null);
+	let dialogEl = $state<HTMLDivElement | null>(null);
+	let previouslyFocused: HTMLElement | null = null;
 
 	$effect(() => {
 		if (open) {
+			previouslyFocused = document.activeElement as HTMLElement | null;
 			tick().then(() => closeBtnEl?.focus());
+		} else if (previouslyFocused) {
+			previouslyFocused.focus();
+			previouslyFocused = null;
 		}
 	});
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (open && e.key === 'Escape') {
+		if (!open) return;
+		if (e.key === 'Escape') {
 			onClose();
+		} else if (e.key === 'Tab') {
+			e.preventDefault();
+			closeBtnEl?.focus();
 		}
 	}
 </script>
@@ -27,6 +37,7 @@
 
 {#if open && imageUrl}
 	<div
+		bind:this={dialogEl}
 		class="lightbox-backdrop"
 		role="dialog"
 		aria-modal="true"

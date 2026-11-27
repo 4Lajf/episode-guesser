@@ -234,7 +234,9 @@
 				role="combobox"
 				aria-autocomplete="list"
 				aria-expanded={dropdownOpen && filteredTitles.length > 0}
-				aria-controls="anime-title-listbox"
+				aria-controls={dropdownOpen && filteredTitles.length > 0
+					? 'anime-title-listbox'
+					: undefined}
 				aria-activedescendant={dropdownOpen && filteredTitles.length > 0
 					? `anime-opt-${activeIndex}`
 					: undefined}
@@ -286,15 +288,14 @@
 					{@const [before, match, after] = splitHighlight(item, titleQuery)}
 					<button
 						type="button"
+						tabindex="-1"
 						id="anime-opt-{idx}"
 						role="option"
 						aria-selected={idx === activeIndex}
 						class="dropdown-opt"
 						class:active={idx === activeIndex}
-						onmousedown={(e) => {
-							e.preventDefault();
-							selectTitle(item);
-						}}
+						onmousedown={(e) => e.preventDefault()}
+						onclick={() => selectTitle(item)}
 						onmouseenter={() => (activeIndex = idx)}
 					>
 						<span class="opt-text">
@@ -514,6 +515,7 @@
 	.dropdown.upward {
 		top: auto;
 		bottom: calc(100% + 6px);
+		max-height: 172px;
 		box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.6);
 	}
 

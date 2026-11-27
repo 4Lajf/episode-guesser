@@ -443,7 +443,7 @@
 		height: 7px;
 		border-radius: 999px;
 		background: var(--ink-0);
-		margin: 24px 0 24px;
+		margin: 24px 0 28px;
 	}
 
 	.ruler-delta {

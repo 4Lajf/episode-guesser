@@ -60,11 +60,11 @@
 		includeSingleEp: false,
 		titlesForDropdown: []
 	});
+	let profileLoading = $state(true);
 	let setupOpen = $state(false);
 	let setupLoading = $state(false);
 	let setupError = $state<string | null>(null);
 	let recentUsers = $state<string[]>([]);
-	let hasInitialized = $state(false);
 
 	let mode = $state<GameMode>('classic');
 	let currentRound = $state<RoundPayload | null>(null);
@@ -143,6 +143,15 @@
 		return `eg:daily:v2:${date}:${scopeKey}`;
 	}
 
+	function clearSavedDaily(date: string, scopeKey: string) {
+		if (typeof localStorage === 'undefined') return;
+		try {
+			localStorage.removeItem(dailyStorageKey(date, scopeKey));
+		} catch {
+			// ignore
+		}
+	}
+
 	function saveDailyProgress() {
 		if (typeof localStorage === 'undefined' || !currentRound?.dailyMeta || !dailyStateToken) return;
 		const state: SavedDailyState = {
@@ -163,12 +172,23 @@
 		}
 	}
 
-	function restoreDailyProgress(date: string, scopeKey: string, freshRound: RoundPayload) {
+	function applyDailyStateFromPayload(date: string, scopeKey: string, payload: RoundPayload) {
+		// Server-enforced restore takes precedence whenever present
+		if (payload.dailyRestore) {
+			dailyAttempts = payload.dailyRestore.attempts;
+			dailyFinished = payload.dailyRestore.finished;
+			dailyWon = payload.dailyRestore.won;
+			dailyReveal = payload.dailyRestore.reveal ?? null;
+			dailyStateToken = payload.dailyStateToken ?? null;
+			saveDailyProgress();
+			return;
+		}
+
 		dailyAttempts = [];
 		dailyFinished = false;
 		dailyWon = false;
 		dailyReveal = null;
-		dailyStateToken = freshRound.dailyStateToken ?? null;
+		dailyStateToken = payload.dailyStateToken ?? null;
 
 		if (typeof localStorage === 'undefined') return;
 		try {
@@ -189,7 +209,7 @@
 				dailyReveal = parsed.reveal ?? null;
 				dailyStateToken = parsed.dailyStateToken;
 				currentRound = {
-					...freshRound,
+					...payload,
 					roundToken: parsed.roundToken,
 					imageUrl: parsed.imageUrl
 				};
@@ -286,6 +306,7 @@
 			return false;
 		} finally {
 			setupLoading = false;
+			profileLoading = false;
 		}
 	}
 
@@ -321,7 +342,6 @@
 
 			const data = await res.json();
 
-			// Drop stale response if user switched modes or triggered another fetch
 			if (seq !== roundRequestSeq || targetMode !== mode) return;
 
 			if (!res.ok) {
@@ -335,7 +355,7 @@
 			roundCounter++;
 
 			if (targetMode === 'daily' && payload.dailyMeta) {
-				restoreDailyProgress(payload.dailyMeta.date, activeDailyScopeKey, payload);
+				applyDailyStateFromPayload(payload.dailyMeta.date, activeDailyScopeKey, payload);
 			}
 		} catch (err) {
 			if (err instanceof Error && err.name === 'AbortError') return;
@@ -385,10 +405,10 @@
 		const reqMode = mode;
 		const reqToken = currentRound.roundToken;
 		const reqSeq = roundRequestSeq;
+		const reqDailyDate = currentRound.dailyMeta?.date;
 		guessInlineError = null;
 		roundError = null;
 
-		// Client-side duplicate guard in Daily Wordle so players don't waste attempts
 		if (reqMode === 'daily' && !skipped) {
 			const normTitle = normalizeTitle(guessedTitle);
 			const dup = dailyAttempts.some(
@@ -423,16 +443,27 @@
 
 			const data = await res.json();
 
-			// Ignore response if user switched mode or started a different round while awaiting
 			if (reqSeq !== roundRequestSeq || reqMode !== mode || currentRound?.roundToken !== reqToken) {
 				return;
 			}
 
 			if (!res.ok) {
+				const errMsg: string = data.error || 'Could not check your guess.';
+				// Recover automatically if a restored Daily token expired or went out of sync (e.g. after redeploy)
+				if (
+					reqMode === 'daily' &&
+					(res.status === 409 || /expired|mismatch|out of sync/i.test(errMsg))
+				) {
+					if (reqDailyDate) clearSavedDaily(reqDailyDate, activeDailyScopeKey);
+					roundError = 'Daily session expired — reloading today’s puzzle.';
+					submitting = false;
+					fetchRound('daily');
+					return;
+				}
 				if (reqMode === 'daily') {
-					guessInlineError = data.error || 'Could not check your guess.';
+					guessInlineError = errMsg;
 				} else {
-					roundError = data.error || 'Could not check your guess.';
+					roundError = errMsg;
 				}
 				return;
 			}
@@ -460,7 +491,7 @@
 
 				if (classicRes.animeMatch === 'exact') {
 					streak++;
-					if (streak > bestStreak) {
+					if (reqMode === 'unlimited' && streak > bestStreak) {
 						bestStreak = streak;
 						try {
 							localStorage.setItem(STORAGE_BEST_STREAK_KEY, String(bestStreak));
@@ -480,7 +511,6 @@
 					];
 				} else {
 					unlimitedScore += classicRes.totalPoints;
-					unlimitedCount++;
 				}
 			}
 		} catch {
@@ -502,6 +532,8 @@
 				return;
 			}
 			classicRoundIndex++;
+		} else if (mode === 'unlimited') {
+			unlimitedCount++;
 		}
 		fetchRound(mode);
 	}
@@ -535,7 +567,6 @@
 		}
 
 		if (urlUser) {
-			hasInitialized = true;
 			loadProfile(urlUser, ['COMPLETED', 'CURRENT'], false, true, true);
 			return;
 		}
@@ -549,7 +580,6 @@
 					includeSingleEp?: boolean;
 				};
 				if (saved.username) {
-					hasInitialized = true;
 					loadProfile(
 						saved.username,
 						saved.statuses ?? ['COMPLETED', 'CURRENT'],
@@ -564,7 +594,6 @@
 			// ignore
 		}
 
-		hasInitialized = true;
 		loadProfile(null, ['COMPLETED', 'CURRENT'], false, true, false);
 	});
 </script>
@@ -576,6 +605,7 @@
 		avatar={profile.avatar}
 		eligibleShows={profile.eligibleShows}
 		isGlobalPool={profile.isGlobalPool}
+		wide={mode === 'daily'}
 		onModeChange={(next) => {
 			if (next !== mode) resetAndStartMode(next);
 		}}
@@ -586,9 +616,9 @@
 	/>
 
 	<main class="main-stage" class:wide-daily={mode === 'daily'}>
-		{#if profile.isGlobalPool && hasInitialized}
+		{#if profile.isGlobalPool && !profileLoading}
 			<div class="anilist-nudge">
-				<span>Playing curated Global Pool (32 iconic anime). Enter your AniList to guess frames from your own watched shows.</span>
+				<span>Playing curated Global Pool ({profile.eligibleShows} iconic anime). Enter your AniList to guess frames from your own watched shows.</span>
 				<button type="button" class="nudge-btn" onclick={() => (setupOpen = true)}>
 					Connect AniList
 				</button>
@@ -643,7 +673,7 @@
 				<div class="daily-left">
 					<LightTable
 						imageUrl={currentRound?.imageUrl ?? null}
-						loading={roundLoading}
+						loading={profileLoading || roundLoading}
 						compact={true}
 						caption={dailyFinished
 							? `Daily #${currentRound?.dailyMeta?.puzzleNumber ?? ''} — full frame unlocked`
@@ -658,7 +688,7 @@
 							titles={dropdownTitles}
 							{submitting}
 							compact={true}
-							disabled={roundLoading || !currentRound}
+							disabled={profileLoading || roundLoading || !currentRound}
 							submitLabel="Submit attempt"
 							skipLabel="Give up"
 							episodeHint="↑↓ direction hints"
@@ -697,7 +727,7 @@
 			<!-- Classic / Unlimited Active Play Stage -->
 			<LightTable
 				imageUrl={currentRound?.imageUrl ?? null}
-				loading={roundLoading}
+				loading={profileLoading || roundLoading}
 				caption="Name the anime and episode number"
 				cropScale={1}
 				allowInspect={true}
@@ -707,7 +737,7 @@
 			<GuessConsole
 				titles={dropdownTitles}
 				{submitting}
-				disabled={roundLoading || !currentRound}
+				disabled={profileLoading || roundLoading || !currentRound}
 				submitLabel="Lock in guess"
 				skipLabel="Skip frame"
 				episodeHint="Near misses still score"

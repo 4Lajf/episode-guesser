@@ -10,8 +10,28 @@ import { unsealPayload } from '$lib/server/token';
 import type { RequestHandler } from './$types';
 
 const MAX_REDIRECTS = 2;
+const MAX_CACHE_ENTRIES = 48;
 
-async function fetchAllowlistedImage(initialUrl: string, signal: AbortSignal): Promise<{
+interface CachedImageResponse {
+	bytes: Uint8Array;
+	mime: string;
+	expiresAt: number;
+}
+
+const renderedCache = new Map<string, CachedImageResponse>();
+
+function putRenderedCache(token: string, entry: CachedImageResponse): void {
+	if (renderedCache.size >= MAX_CACHE_ENTRIES) {
+		const first = renderedCache.keys().next().value;
+		if (first) renderedCache.delete(first);
+	}
+	renderedCache.set(token, entry);
+}
+
+async function fetchAllowlistedImage(
+	initialUrl: string,
+	signal: AbortSignal
+): Promise<{
 	buffer: Buffer;
 	contentType: string;
 }> {
@@ -39,7 +59,6 @@ async function fetchAllowlistedImage(initialUrl: string, signal: AbortSignal): P
 			throw error(502, 'Could not reach upstream image host');
 		}
 
-		// Follow redirects only if the Location target is also on ALLOWED_IMAGE_HOSTS
 		if (res.status >= 300 && res.status < 400) {
 			const location = res.headers.get('location');
 			if (!location || hop === MAX_REDIRECTS) {
@@ -67,7 +86,6 @@ async function fetchAllowlistedImage(initialUrl: string, signal: AbortSignal): P
 			throw error(502, 'Upstream image exceeds maximum allowed size');
 		}
 
-		// Read with hard byte ceiling so chunked responses cannot exceed MAX_IMAGE_BYTES
 		const reader = res.body.getReader();
 		const chunks: Uint8Array[] = [];
 		let total = 0;
@@ -114,6 +132,18 @@ async function applyServerCrop(buffer: Buffer, crop: CropSpec): Promise<Buffer> 
 }
 
 export const GET: RequestHandler = async ({ params }) => {
+	const cached = renderedCache.get(params.token);
+	if (cached && cached.expiresAt > Date.now()) {
+		return new Response(new Uint8Array(cached.bytes), {
+			status: 200,
+			headers: {
+				'content-type': cached.mime,
+				'cache-control': 'public, max-age=43200, immutable',
+				'x-content-type-options': 'nosniff'
+			}
+		});
+	}
+
 	const secret = unsealPayload<SealedImageSecret>(params.token);
 	if (!secret || !secret.url || secret.exp < Date.now()) {
 		throw error(404, 'Image token expired or invalid');
@@ -141,7 +171,16 @@ export const GET: RequestHandler = async ({ params }) => {
 			}
 		}
 
-		return new Response(new Uint8Array(outBuffer), {
+		const bytes = new Uint8Array(outBuffer);
+		if (bytes.byteLength <= 1_500_000) {
+			putRenderedCache(params.token, {
+				bytes,
+				mime: outMime,
+				expiresAt: Math.min(secret.exp, Date.now() + 60 * 60 * 1000)
+			});
+		}
+
+		return new Response(bytes, {
 			status: 200,
 			headers: {
 				'content-type': outMime,

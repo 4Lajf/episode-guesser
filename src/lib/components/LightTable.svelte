@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { tick } from 'svelte';
+
 	interface Props {
 		imageUrl: string | null;
 		loading: boolean;
@@ -21,11 +23,19 @@
 
 	let imgLoaded = $state(false);
 	let imgFailed = $state(false);
+	let imgEl = $state<HTMLImageElement | null>(null);
 
 	$effect(() => {
-		void imageUrl;
+		const url = imageUrl;
 		imgLoaded = false;
 		imgFailed = false;
+		if (url) {
+			tick().then(() => {
+				if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+					imgLoaded = true;
+				}
+			});
+		}
 	});
 
 	const canInspect = $derived(
@@ -70,6 +80,7 @@
 					</div>
 				{/if}
 				<img
+					bind:this={imgEl}
 					src={imageUrl}
 					alt="Anime episode screencap"
 					class="screencap-img"

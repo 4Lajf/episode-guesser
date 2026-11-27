@@ -37,10 +37,12 @@ export interface SealedDailyState {
 	usedKeys: string[];
 }
 
+export const IMAGE_TOKEN_TTL_MS = 36 * 60 * 60 * 1000; // 36 hours (outlives a full UTC daily cycle)
+
 export function mintImageUrl(rawUrl: string, crop?: CropSpec): string {
 	const token = sealPayload<SealedImageSecret>({
 		url: rawUrl,
-		exp: Date.now() + 12 * 60 * 60 * 1000,
+		exp: Date.now() + IMAGE_TOKEN_TTL_MS,
 		...(crop && crop.scale > 1.01 ? { crop } : {})
 	});
 	return `/api/image/${token}`;
@@ -72,6 +74,7 @@ export async function pickRoundFromPool(params: {
 	excludeMediaIds?: number[];
 	seed?: string;
 }): Promise<{
+	roundId: string;
 	roundToken: string;
 	dailyStateToken?: string;
 	imageUrl: string;
@@ -99,7 +102,11 @@ export async function pickRoundFromPool(params: {
 
 	for (let i = 0; i < maxAttempts; i++) {
 		const show = ordered[i];
-		const anizip = await fetchAniZipEpisodes(show.id);
+		let anizip = await fetchAniZipEpisodes(show.id);
+		// Retry once for seeded Daily picks so a transient hiccup doesn't diverge two players' Global Daily
+		if (!anizip && seed) {
+			anizip = await fetchAniZipEpisodes(show.id);
+		}
 		if (!anizip) continue;
 
 		const isCompleted = show.status === 'COMPLETED' || show.status === 'REPEATING';
@@ -184,6 +191,7 @@ export async function pickRoundFromPool(params: {
 				: undefined;
 
 		return {
+			roundId,
 			roundToken,
 			dailyStateToken,
 			imageUrl: initialImageUrl,

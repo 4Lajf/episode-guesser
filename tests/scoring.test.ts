@@ -33,8 +33,9 @@ const SAMPLE_REVEAL: EpisodeReveal = {
 
 describe('normalizeTitle & matchAnimeTitle', () => {
 	it('handles backticks, punctuation, diacritics, Unicode × vs x, and trailing years', () => {
-		expect(normalizeTitle('Frieren: Beyond Journey`s End')).toBe('frieren beyond journeys end');
-		expect(normalizeTitle("Frieren: Beyond Journey's End")).toBe('frieren beyond journeys end');
+		expect(normalizeTitle('Frieren: Beyond Journey`s End')).toBe(
+			normalizeTitle("Frieren: Beyond Journey's End")
+		);
 		expect(normalizeTitle('Steins;Gate')).toBe('steins gate');
 		expect(normalizeTitle('Pokémon')).toBe('pokemon');
 		expect(normalizeTitle('HUNTER×HUNTER (2011)')).toBe('hunter x hunter');
@@ -42,9 +43,16 @@ describe('normalizeTitle & matchAnimeTitle', () => {
 		expect(normalizeTitle('SPY×FAMILY')).toBe('spy x family');
 		expect(normalizeTitle('SPY x FAMILY')).toBe('spy x family');
 		expect(normalizeTitle('【Oshi no Ko】')).toBe('oshi no ko');
+		expect(normalizeTitle('Kono Subarashii Sekai ni Shukufuku o! 3')).toBe(
+			normalizeTitle('Kono Subarashii Sekai ni Shukufuku wo! 3')
+		);
+		expect(normalizeTitle('Mahou Shoujo Madoka☆Magica')).toBe(
+			normalizeTitle('Maho Shojo Madoka Magica')
+		);
+		expect(normalizeTitle('Yuu☆Yuu☆Hakusho')).toBe(normalizeTitle('Yu Yu Hakusho'));
 	});
 
-	it('matches exact aliases including HxH, Spy x Family, and detects franchises', () => {
+	it('matches exact aliases including HxH, Spy x Family, KonoSuba o/wo, and detects franchises', () => {
 		const targets = ['Sousou no Frieren', 'Frieren: Beyond Journey`s End'];
 		const franchise = ['Sousou no Frieren 2nd Season'];
 
@@ -56,6 +64,13 @@ describe('normalizeTitle & matchAnimeTitle', () => {
 		expect(matchAnimeTitle('Hunter x Hunter', ['HUNTER×HUNTER (2011)'], [])).toBe('exact');
 		expect(matchAnimeTitle('SPY x FAMILY', ['SPY×FAMILY'], [])).toBe('exact');
 		expect(matchAnimeTitle('Oshi no Ko', ['【Oshi no Ko】'], [])).toBe('exact');
+		expect(
+			matchAnimeTitle(
+				'Kono Subarashii Sekai ni Shukufuku o! 3',
+				['Kono Subarashii Sekai ni Shukufuku wo! 3'],
+				[]
+			)
+		).toBe('exact');
 	});
 });
 

@@ -7,6 +7,7 @@
 		avatar: string | null;
 		eligibleShows: number;
 		isGlobalPool: boolean;
+		wide?: boolean;
 		onModeChange: (mode: GameMode) => void;
 		onOpenSetup: () => void;
 	}
@@ -17,6 +18,7 @@
 		avatar,
 		eligibleShows,
 		isGlobalPool,
+		wide = false,
 		onModeChange,
 		onOpenSetup
 	}: Props = $props();
@@ -38,7 +40,7 @@
 </script>
 
 <header class="topbar">
-	<div class="topbar-inner">
+	<div class="topbar-inner" class:wide>
 		<a
 			class="brand"
 			href="/"
@@ -105,6 +107,10 @@
 		grid-template-columns: 1fr auto 1fr;
 		align-items: center;
 		gap: 16px;
+	}
+
+	.topbar-inner.wide {
+		max-width: 1320px;
 	}
 
 	.brand {
