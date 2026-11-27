@@ -160,13 +160,7 @@ export function compareLeaderboardEntries(
 	const ptsB = typeof b.points === 'number' ? b.points : ensureEntryPoints(b).points;
 	if (ptsA !== ptsB) return ptsB - ptsA;
 
-	// 2. Solved beats unsolved on equal points
-	if (a.won !== b.won) return a.won ? -1 : 1;
-
-	// 3. Fewer attempts first
-	if (a.attemptsUsed !== b.attemptsUsed) return a.attemptsUsed - b.attemptsUsed;
-
-	// 4. Clean deterministic tiebreaker
+	// 2. On any tie, the first result recorded stays ahead (first come, first placed)
 	return a.completedAt - b.completedAt;
 }
 

@@ -355,7 +355,7 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 		expect(getGlobalPool(1000).length).toBe(1000);
 	});
 
-	it('ranks Global Daily Leaderboard by won, fewest attempts, then fastest solveMs and is immutable per user/day', () => {
+	it('ranks Global Daily Leaderboard by points, keeps first result ahead on ties, and is immutable per user/day', () => {
 		clearLeaderboardStoreForTests();
 		const date = '2026-11-27';
 		const winAttempt = evaluateWordleAttempt({
@@ -380,6 +380,15 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 			actualYear: 2023,
 			totalEpisodes: 28
 		});
+		const giveUpAttempt = {
+			...missAttempt,
+			guessedTitle: 'Gave up',
+			guessedEpisode: 0,
+			guessedYear: null,
+			yearDirection: null,
+			episodeDirection: null,
+			gaveUp: true
+		};
 
 		const base = 1_700_000_000_000;
 		const animeHitEpMiss = evaluateWordleAttempt({
@@ -410,13 +419,39 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 			startedAt: base + 500_000,
 			completedAt: base + 530_000
 		});
+		// First 1,000-pt solver (even with slower solveMs) stays #1 ahead of a later tied 1,000-pt solver
 		recordDailyLeaderboardResult({
 			date,
-			user: { anilistUserId: 103, username: 'OneShot', avatar: null, siteUrl: 'https://anilist.co/user/OneShot' },
+			user: { anilistUserId: 103, username: 'FirstOneShot', avatar: null, siteUrl: 'https://anilist.co/user/FirstOneShot' },
 			attempts: [winAttempt],
 			won: true,
 			startedAt: base,
 			completedAt: base + 120_000
+		});
+		recordDailyLeaderboardResult({
+			date,
+			user: { anilistUserId: 104, username: 'SecondOneShot', avatar: null, siteUrl: 'https://anilist.co/user/SecondOneShot' },
+			attempts: [winAttempt],
+			won: true,
+			startedAt: base + 195_000,
+			completedAt: base + 200_000
+		});
+		// Earlier 0-pt 5-attempt miss stays ahead of a later 0-pt 1-attempt give-up
+		recordDailyLeaderboardResult({
+			date,
+			user: { anilistUserId: 105, username: 'EarlierZero', avatar: null, siteUrl: 'https://anilist.co/user/EarlierZero' },
+			attempts: [1, 2, 3, 4, 5].map((n) => ({ ...missAttempt, attemptNumber: n })),
+			won: false,
+			startedAt: base,
+			completedAt: base + 300_000
+		});
+		recordDailyLeaderboardResult({
+			date,
+			user: { anilistUserId: 106, username: 'LaterGiveUp', avatar: null, siteUrl: 'https://anilist.co/user/LaterGiveUp' },
+			attempts: [giveUpAttempt],
+			won: false,
+			startedAt: base + 400_000,
+			completedAt: base + 405_000
 		});
 		// Duplicate submission for user 101 must NOT overwrite their recorded 2/5 result
 		recordDailyLeaderboardResult({
@@ -429,12 +464,19 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 		});
 
 		const board = getDailyLeaderboard(date, 102, true);
-		expect(board.totalPlayers).toBe(3);
-		expect(board.solvedCount).toBe(3);
-		expect(board.entries.map((e) => e.username)).toEqual(['OneShot', 'EarlyAnimeTwo', 'LateTwo']);
-		expect(board.entries.map((e) => e.points)).toEqual([1000, 875, 850]);
-		expect(board.me?.rank).toBe(2);
-		expect(board.entries[2].attemptsUsed).toBe(2);
+		expect(board.totalPlayers).toBe(6);
+		expect(board.solvedCount).toBe(4);
+		expect(board.entries.map((e) => e.username)).toEqual([
+			'FirstOneShot',
+			'SecondOneShot',
+			'EarlyAnimeTwo',
+			'LateTwo',
+			'EarlierZero',
+			'LaterGiveUp'
+		]);
+		expect(board.entries.map((e) => e.points)).toEqual([1000, 1000, 875, 850, 0, 0]);
+		expect(board.me?.rank).toBe(3);
+		expect(board.entries[3].attemptsUsed).toBe(2);
 		clearLeaderboardStoreForTests();
 	});
 

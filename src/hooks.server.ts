@@ -111,6 +111,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 	response.headers.set('x-frame-options', 'DENY');
 	if (!pathname.startsWith('/api/')) {
 		response.headers.set('content-security-policy', CSP);
+		if (response.headers.get('content-type')?.includes('text/html')) {
+			response.headers.set('cache-control', 'no-cache, no-store, must-revalidate');
+		}
 	}
 	return response;
 };

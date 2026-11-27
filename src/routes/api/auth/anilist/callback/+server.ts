@@ -147,8 +147,7 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 					user: authUser,
 					attempts: guestRec.attempts,
 					won: guestRec.won,
-					startedAt: unsealedRound.createdAt,
-					completedAt: guestRec.updatedAt
+					startedAt: unsealedRound.createdAt
 				});
 			}
 		}

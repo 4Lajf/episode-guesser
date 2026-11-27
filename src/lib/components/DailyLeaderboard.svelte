@@ -69,9 +69,9 @@
 			</h2>
 			<p class="lb-sub">
 				{#if leaderboard && leaderboard.totalPlayers > 0}
-					{leaderboard.totalPlayers} {leaderboard.totalPlayers === 1 ? 'player' : 'players'} · {leaderboard.solvedCount} solved · Ranked by Daily points (up to 1,000)
+					{leaderboard.totalPlayers} {leaderboard.totalPlayers === 1 ? 'player' : 'players'} · {leaderboard.solvedCount} solved · Ranked by Daily points (ties go to first)
 				{:else}
-					Ranked by Daily points (up to 1,000)
+					Ranked by Daily points (ties go to first)
 				{/if}
 			</p>
 		</div>
