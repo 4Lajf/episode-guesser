@@ -14,6 +14,7 @@
 		dailyPuzzleNumber?: number;
 		dailyScopeLabel?: string;
 		dailyAttemptsCount: number;
+		dailyGaveUp?: boolean;
 		dailyWon: boolean;
 		dailyFinished: boolean;
 	}
@@ -30,6 +31,7 @@
 		dailyPuzzleNumber,
 		dailyScopeLabel,
 		dailyAttemptsCount,
+		dailyGaveUp = false,
 		dailyWon,
 		dailyFinished
 	}: Props = $props();
@@ -106,7 +108,11 @@
 				<span class="metric-label">Status</span>
 				<span class="metric-val font-display" class:accent={!dailyFinished} class:hit={dailyWon}>
 					{#if dailyFinished}
-						{dailyWon ? `Solved in ${dailyAttemptsCount}/${WORDLE_MAX_ATTEMPTS}` : `Missed (${WORDLE_MAX_ATTEMPTS}/${WORDLE_MAX_ATTEMPTS})`}
+						{dailyWon
+							? `Solved in ${dailyAttemptsCount}/${WORDLE_MAX_ATTEMPTS}`
+							: dailyGaveUp
+								? 'Gave up'
+								: `Missed (${WORDLE_MAX_ATTEMPTS}/${WORDLE_MAX_ATTEMPTS})`}
 					{:else}
 						Attempt {Math.min(dailyAttemptsCount + 1, WORDLE_MAX_ATTEMPTS)} of {WORDLE_MAX_ATTEMPTS}
 					{/if}

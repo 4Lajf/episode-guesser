@@ -27,11 +27,17 @@ export interface SealedRoundSecret {
 	targetTitles: string[];
 	franchiseTitles: string[];
 	reveal: EpisodeReveal;
+	dailyDate?: string;
+	scopeKey?: string;
+	playerId?: string;
 }
 
 export interface SealedDailyState {
 	v: 1;
 	roundId: string;
+	dailyDate: string;
+	scopeKey: string;
+	playerId: string;
 	attemptsUsed: number;
 	finished: boolean;
 	usedKeys: string[];
@@ -73,6 +79,11 @@ export async function pickRoundFromPool(params: {
 	mode: GameMode;
 	excludeMediaIds?: number[];
 	seed?: string;
+	dailyBinding?: {
+		dailyDate: string;
+		scopeKey: string;
+		playerId: string;
+	};
 }): Promise<{
 	roundId: string;
 	roundToken: string;
@@ -81,7 +92,7 @@ export async function pickRoundFromPool(params: {
 	originX: number;
 	originY: number;
 }> {
-	const { pool, mode, excludeMediaIds = [], seed } = params;
+	const { pool, mode, excludeMediaIds = [], seed, dailyBinding } = params;
 	if (pool.length === 0) {
 		throw new Error('No eligible anime found in this list. Try including more list statuses.');
 	}
@@ -176,14 +187,24 @@ export async function pickRoundFromPool(params: {
 			originY,
 			targetTitles,
 			franchiseTitles: show.franchiseTitles,
-			reveal
+			reveal,
+			...(dailyBinding
+				? {
+						dailyDate: dailyBinding.dailyDate,
+						scopeKey: dailyBinding.scopeKey,
+						playerId: dailyBinding.playerId
+					}
+				: {})
 		});
 
 		const dailyStateToken =
-			mode === 'daily'
+			mode === 'daily' && dailyBinding
 				? sealPayload<SealedDailyState>({
 						v: 1,
 						roundId,
+						dailyDate: dailyBinding.dailyDate,
+						scopeKey: dailyBinding.scopeKey,
+						playerId: dailyBinding.playerId,
 						attemptsUsed: 0,
 						finished: false,
 						usedKeys: []

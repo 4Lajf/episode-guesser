@@ -191,7 +191,13 @@
 		<div class="daily-result">
 			<div class="daily-answer">
 				<span class="result-badge font-display" class:won>
-					{won ? `Solved in ${attempts.length} of ${WORDLE_MAX_ATTEMPTS}` : 'Out of attempts'}
+					{#if won}
+						Solved in {attempts.length} of {WORDLE_MAX_ATTEMPTS}
+					{:else if attempts.some((a) => a.guessedEpisode === 0 && a.guessedTitle === 'Gave up')}
+						Gave up
+					{:else}
+						Out of attempts
+					{/if}
 				</span>
 				<h3 class="answer-title">{reveal.titleRomaji}</h3>
 				<p class="answer-ep">

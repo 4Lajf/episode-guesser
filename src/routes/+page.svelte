@@ -9,7 +9,12 @@
 	import PlayerSetupModal from '$lib/components/PlayerSetupModal.svelte';
 	import RoundReveal from '$lib/components/RoundReveal.svelte';
 	import SessionBar from '$lib/components/SessionBar.svelte';
-	import { CLASSIC_ROUNDS, normalizeTitle, WORDLE_ZOOM_STEPS } from '$lib/scoring';
+	import {
+		CLASSIC_ROUNDS,
+		dropdownDedupeKey,
+		normalizeTitle,
+		WORDLE_ZOOM_STEPS
+	} from '$lib/scoring';
 	import type {
 		ClassicGuessResponse,
 		CompletedClassicRound,
@@ -47,6 +52,7 @@
 	const STORAGE_USER_KEY = 'eg:anilist-config:v1';
 	const STORAGE_RECENT_KEY = 'eg:recent-users:v1';
 	const STORAGE_BEST_STREAK_KEY = 'eg:best-streak:v1';
+	const STORAGE_DAILY_SCOPE_KEY = 'eg:daily-global:v1';
 
 	let anisongDbTitles = $state<string[]>([]);
 
@@ -104,18 +110,18 @@
 	let dailyWon = $state(false);
 	let dailyReveal = $state<EpisodeReveal | null>(null);
 
-	// Merged, normalized-deduplicated dropdown titles (cached AnisongDB + profile titles)
+	// Merged, year-preserving deduplicated dropdown titles (cached AnisongDB + profile titles)
 	const dropdownTitles = $derived.by(() => {
-		const byNorm = new Map<string, string>();
+		const byKey = new Map<string, string>();
 		for (const t of anisongDbTitles) {
-			const k = normalizeTitle(t);
-			if (k && !byNorm.has(k)) byNorm.set(k, t);
+			const k = dropdownDedupeKey(t);
+			if (k && !byKey.has(k)) byKey.set(k, t);
 		}
 		for (const t of profile.titlesForDropdown) {
-			const k = normalizeTitle(t);
-			if (k && !byNorm.has(k)) byNorm.set(k, t);
+			const k = dropdownDedupeKey(t);
+			if (k && !byKey.has(k)) byKey.set(k, t);
 		}
-		return Array.from(byNorm.values()).sort((a, b) =>
+		return Array.from(byKey.values()).sort((a, b) =>
 			a.localeCompare(b, 'en', { sensitivity: 'base' })
 		);
 	});
@@ -172,15 +178,14 @@
 		}
 	}
 
-	function applyDailyStateFromPayload(date: string, scopeKey: string, payload: RoundPayload) {
-		// Server-enforced restore takes precedence whenever present
+	function applyDailyStateFromPayload(payload: RoundPayload) {
+		// Server dailyStore + eg_pid cookie is the authoritative source of truth for Daily state
 		if (payload.dailyRestore) {
 			dailyAttempts = payload.dailyRestore.attempts;
 			dailyFinished = payload.dailyRestore.finished;
 			dailyWon = payload.dailyRestore.won;
 			dailyReveal = payload.dailyRestore.reveal ?? null;
 			dailyStateToken = payload.dailyStateToken ?? null;
-			saveDailyProgress();
 			return;
 		}
 
@@ -189,34 +194,6 @@
 		dailyWon = false;
 		dailyReveal = null;
 		dailyStateToken = payload.dailyStateToken ?? null;
-
-		if (typeof localStorage === 'undefined') return;
-		try {
-			const raw = localStorage.getItem(dailyStorageKey(date, scopeKey));
-			if (!raw) return;
-			const parsed = JSON.parse(raw) as SavedDailyState;
-			if (
-				parsed.date === date &&
-				parsed.scopeKey === scopeKey &&
-				Array.isArray(parsed.attempts) &&
-				parsed.roundToken &&
-				parsed.dailyStateToken &&
-				parsed.imageUrl
-			) {
-				dailyAttempts = parsed.attempts;
-				dailyFinished = Boolean(parsed.finished);
-				dailyWon = Boolean(parsed.won);
-				dailyReveal = parsed.reveal ?? null;
-				dailyStateToken = parsed.dailyStateToken;
-				currentRound = {
-					...payload,
-					roundToken: parsed.roundToken,
-					imageUrl: parsed.imageUrl
-				};
-			}
-		} catch {
-			// ignore corrupt state
-		}
 	}
 
 	function saveRecentUser(name: string) {
@@ -273,7 +250,15 @@
 			}
 
 			profile = data as PublicProfile;
-			dailyUseGlobal = profile.isGlobalPool;
+			if (profile.isGlobalPool) {
+				dailyUseGlobal = true;
+			} else {
+				try {
+					dailyUseGlobal = localStorage.getItem(STORAGE_DAILY_SCOPE_KEY) === '1';
+				} catch {
+					dailyUseGlobal = false;
+				}
+			}
 
 			if (!profile.isGlobalPool) {
 				saveRecentUser(profile.username);
@@ -355,7 +340,7 @@
 			roundCounter++;
 
 			if (targetMode === 'daily' && payload.dailyMeta) {
-				applyDailyStateFromPayload(payload.dailyMeta.date, activeDailyScopeKey, payload);
+				applyDailyStateFromPayload(payload);
 			}
 		} catch (err) {
 			if (err instanceof Error && err.name === 'AbortError') return;
@@ -449,13 +434,12 @@
 
 			if (!res.ok) {
 				const errMsg: string = data.error || 'Could not check your guess.';
-				// Recover automatically if a restored Daily token expired or went out of sync (e.g. after redeploy)
 				if (
 					reqMode === 'daily' &&
-					(res.status === 409 || /expired|mismatch|out of sync/i.test(errMsg))
+					(res.status === 409 || res.status === 403 || /expired|mismatch|out of sync/i.test(errMsg))
 				) {
 					if (reqDailyDate) clearSavedDaily(reqDailyDate, activeDailyScopeKey);
-					roundError = 'Daily session expired — reloading today’s puzzle.';
+					roundError = 'Daily session refreshed — loading today’s puzzle.';
 					submitting = false;
 					fetchRound('daily');
 					return;
@@ -637,6 +621,7 @@
 			dailyPuzzleNumber={currentRound?.dailyMeta?.puzzleNumber}
 			dailyScopeLabel={currentRound?.dailyMeta?.scopeLabel}
 			dailyAttemptsCount={dailyAttempts.length}
+			dailyGaveUp={dailyAttempts.some((a) => a.guessedEpisode === 0 && a.guessedTitle === 'Gave up')}
 			{dailyWon}
 			{dailyFinished}
 		/>
@@ -713,6 +698,11 @@
 						isGlobalDaily={dailyUseGlobal}
 						onToggleScope={() => {
 							dailyUseGlobal = !dailyUseGlobal;
+							try {
+								localStorage.setItem(STORAGE_DAILY_SCOPE_KEY, dailyUseGlobal ? '1' : '0');
+							} catch {
+								// ignore
+							}
 							dailyAttempts = [];
 							dailyFinished = false;
 							dailyWon = false;

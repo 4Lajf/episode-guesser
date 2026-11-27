@@ -37,6 +37,16 @@ export function normalizeTitle(raw: string): string {
 		.replace(/uu/g, 'u');
 }
 
+/**
+ * Deduplication key for dropdown titles that preserves trailing "(YYYY)" release years
+ * so remakes like "Hunter x Hunter (2011)" and "Fruits Basket (2019)" stay distinct.
+ */
+export function dropdownDedupeKey(raw: string): string {
+	const yearMatch = raw.match(/\((\d{4})\)\s*$/);
+	const base = normalizeTitle(raw);
+	return yearMatch ? `${base} (${yearMatch[1]})` : base;
+}
+
 export function matchAnimeTitle(
 	guess: string,
 	targetTitles: string[],
@@ -51,10 +61,15 @@ export function matchAnimeTitle(
 	const normFranchise = new Set(franchiseTitles.map(normalizeTitle).filter(Boolean));
 	if (normFranchise.has(normGuess)) return 'franchise';
 
-	// Prefix/containment fallback for same-franchise season subtitles (e.g. "Steins;Gate 0" vs "Steins;Gate")
+	// Prefix fallback for same-franchise season subtitles (e.g. "Steins;Gate 0" vs "Steins;Gate"),
+	// requiring the full target title or a multi-word prefix so single truncated words like "Mushoku" never score.
 	if (normGuess.length >= 5) {
 		for (const t of normTargets) {
-			if (t.length >= 5 && (normGuess.startsWith(`${t} `) || t.startsWith(`${normGuess} `))) {
+			if (
+				t.length >= 5 &&
+				(normGuess.startsWith(`${t} `) ||
+					(normGuess.includes(' ') && normGuess.length >= 10 && t.startsWith(`${normGuess} `)))
+			) {
 				return 'franchise';
 			}
 		}
@@ -284,7 +299,7 @@ export function buildClassicShareText(params: {
 	const bars = params.rounds
 		.map((r) => {
 			const p = r.result.totalPoints;
-			if (p >= 750) return '🟩';
+			if (p >= 800) return '🟩';
 			if (p >= 450) return '🟨';
 			return '⬛';
 		})

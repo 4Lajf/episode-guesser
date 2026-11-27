@@ -67,8 +67,8 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 			});
 			pool = profile.pool;
 			scopeLabel = `${profile.username}'s list`;
-			seedKey = `anilist:${profile.username.toLowerCase()}`;
 			scopeKey = `user:${profile.username.toLowerCase()}:${cleanStatuses.slice().sort().join(',')}:${includeSingleEp ? '1' : '0'}`;
+			seedKey = scopeKey;
 		}
 
 		const todayUtc = getTodayUtcDate();
@@ -106,7 +106,16 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 			pool,
 			mode,
 			excludeMediaIds: mode === 'daily' ? [] : excludeMediaIds,
-			seed
+			seed,
+			...(mode === 'daily'
+				? {
+						dailyBinding: {
+							dailyDate: todayUtc,
+							scopeKey,
+							playerId
+						}
+					}
+				: {})
 		});
 
 		if (mode === 'daily' && picked.dailyStateToken) {

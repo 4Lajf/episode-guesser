@@ -3,7 +3,6 @@ import { CURATED_GLOBAL_POOL } from '$lib/curated';
 import {
 	evaluateClassicGuess,
 	evaluateWordleAttempt,
-	getTodayUtcDate,
 	matchAnimeTitle,
 	normalizeTitle,
 	WORDLE_MAX_ATTEMPTS,
@@ -63,7 +62,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	const guessedEpisode =
 		parsedEp !== null && Number.isFinite(parsedEp) && parsedEp >= 1 ? Math.round(parsedEp) : null;
 
-	// Helper: enrich target/franchise titles via AniList ID lookup if normalized strings didn't match
+	// Helper: enrich target/franchise titles via AniList ID lookup ONLY when the normalized
+	// title matches the returned AniList entry EXACTLY (prevents partial free-text like "Mushoku"
+	// from scoring exact points via AniList fuzzy search).
 	async function resolveAniListFallback(
 		currentTargets: string[],
 		currentFranchise: string[]
@@ -75,12 +76,19 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		const lookup = await lookupAnimeByTitle(guessedTitle);
 		if (!lookup) return { targets: currentTargets, franchise: currentFranchise, lookup: null };
 
-		if (lookup.id === secret!.reveal.anilistId) {
-			return { targets: [...currentTargets, guessedTitle], franchise: currentFranchise, lookup };
+		if (lookup.exactTitleMatch) {
+			if (lookup.id === secret!.reveal.anilistId) {
+				return { targets: [...currentTargets, guessedTitle], franchise: currentFranchise, lookup };
+			}
+			if (direct === 'wrong' && lookup.relatedIds.includes(secret!.reveal.anilistId)) {
+				return {
+					targets: currentTargets,
+					franchise: [...currentFranchise, guessedTitle],
+					lookup
+				};
+			}
 		}
-		if (lookup.relatedIds.includes(secret!.reveal.anilistId)) {
-			return { targets: currentTargets, franchise: [...currentFranchise, guessedTitle], lookup };
-		}
+
 		return { targets: currentTargets, franchise: currentFranchise, lookup };
 	}
 
@@ -111,33 +119,51 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		return json(result);
 	}
 
-	// Daily Wordle evaluation — strictly verified via sealed dailyStateToken + server cookie record
+	// Daily Wordle evaluation — strictly bound to sealed playerId, dailyDate, scopeKey, and roundId
 	if (!body.dailyStateToken || typeof body.dailyStateToken !== 'string') {
 		return json({ error: 'Missing Daily session state. Reload the daily frame.' }, { status: 400 });
 	}
 
 	const dailyState = unsealPayload<SealedDailyState>(body.dailyStateToken);
-	if (!dailyState || dailyState.v !== 1 || dailyState.roundId !== secret.roundId) {
+	if (
+		!dailyState ||
+		dailyState.v !== 1 ||
+		dailyState.roundId !== secret.roundId ||
+		!secret.playerId ||
+		!secret.dailyDate ||
+		!secret.scopeKey ||
+		dailyState.playerId !== secret.playerId ||
+		dailyState.dailyDate !== secret.dailyDate ||
+		dailyState.scopeKey !== secret.scopeKey
+	) {
 		return json({ error: 'Daily session mismatch. Reload the daily frame.' }, { status: 400 });
 	}
 
-	const playerId = cookies.get(PLAYER_COOKIE);
-	const todayUtc = getTodayUtcDate();
-	const cleanStatuses = sanitizeStatuses(body.statuses);
-	const includeSingleEp = Boolean(body.includeSingleEp);
-	const scopeKey = body.username
-		? `user:${body.username.trim().toLowerCase()}:${cleanStatuses.slice().sort().join(',')}:${includeSingleEp ? '1' : '0'}`
-		: 'global';
+	const cookiePid = cookies.get(PLAYER_COOKIE);
+	if (!cookiePid || cookiePid !== dailyState.playerId) {
+		return json(
+			{ error: 'Daily session cookie missing or mismatched. Reload the daily frame.' },
+			{ status: 403 }
+		);
+	}
 
-	const serverRecord = playerId ? getDailyRecord(playerId, todayUtc, scopeKey) : null;
-	if (serverRecord && serverRecord.roundId === secret.roundId) {
+	// Always read dailyDate & scopeKey exclusively from the sealed token (never from body or current clock)
+	const { dailyDate, scopeKey, playerId } = dailyState;
+	const serverRecord = getDailyRecord(playerId, dailyDate, scopeKey);
+
+	if (serverRecord) {
+		if (serverRecord.roundId !== secret.roundId) {
+			return json({ error: 'Daily session out of sync. Reloading latest state.' }, { status: 409 });
+		}
 		if (serverRecord.finished || serverRecord.attempts.length >= WORDLE_MAX_ATTEMPTS) {
 			return json({ error: 'This daily puzzle is already finished.' }, { status: 400 });
 		}
-		// Reject stale replayed state tokens
 		if (dailyState.attemptsUsed !== serverRecord.attempts.length) {
 			return json({ error: 'Daily session out of sync. Reloading latest state.' }, { status: 409 });
 		}
+	} else if (dailyState.attemptsUsed > 0) {
+		// Server store was cleared (e.g. ephemeral restart without persistent volume) while client holds mid-run token
+		return json({ error: 'Daily session out of sync. Reloading latest state.' }, { status: 409 });
 	}
 
 	if (dailyState.finished || dailyState.attemptsUsed >= WORDLE_MAX_ATTEMPTS) {
@@ -146,14 +172,19 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	const attemptNumber = dailyState.attemptsUsed + 1;
 	const skipped = Boolean(body.skipped);
+	const existingAttempts = serverRecord?.attempts ?? [];
+	const usedKeys = serverRecord ? serverRecord.usedKeys : dailyState.usedKeys;
 
 	if (skipped) {
 		const nextStateToken = sealPayload<SealedDailyState>({
 			v: 1,
 			roundId: secret.roundId,
+			dailyDate,
+			scopeKey,
+			playerId,
 			attemptsUsed: WORDLE_MAX_ATTEMPTS,
 			finished: true,
-			usedKeys: dailyState.usedKeys
+			usedKeys
 		});
 
 		const giveUpAttempt = {
@@ -169,22 +200,20 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			solved: false
 		};
 
-		if (playerId) {
-			saveDailyRecord(playerId, {
-				date: todayUtc,
-				scopeKey,
-				roundId: secret.roundId,
-				roundToken: body.roundToken,
-				dailyStateToken: nextStateToken,
-				currentImageUrl: secret.reveal.imageUrl,
-				attempts: [...(serverRecord?.attempts ?? []), giveUpAttempt],
-				usedKeys: dailyState.usedKeys,
-				finished: true,
-				won: false,
-				reveal: secret.reveal,
-				updatedAt: Date.now()
-			});
-		}
+		saveDailyRecord(playerId, {
+			date: dailyDate,
+			scopeKey,
+			roundId: secret.roundId,
+			roundToken: body.roundToken,
+			dailyStateToken: nextStateToken,
+			currentImageUrl: secret.reveal.imageUrl,
+			attempts: [...existingAttempts, giveUpAttempt],
+			usedKeys,
+			finished: true,
+			won: false,
+			reveal: secret.reveal,
+			updatedAt: Date.now()
+		});
 
 		const res: WordleGuessResponse = {
 			mode: 'daily',
@@ -204,7 +233,6 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	const normGuess = normalizeTitle(guessedTitle);
 	const guessKey = `${normGuess}#${guessedEpisode}`;
-	const usedKeys = serverRecord?.roundId === secret.roundId ? serverRecord.usedKeys : dailyState.usedKeys;
 	if (usedKeys.includes(guessKey)) {
 		return json(
 			{ error: `You already tried "${guessedTitle}" episode ${guessedEpisode}.` },
@@ -229,8 +257,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		try {
 			const profile = await fetchAniListProfile({
 				username: body.username,
-				statuses: cleanStatuses,
-				includeSingleEp
+				statuses: sanitizeStatuses(body.statuses),
+				includeSingleEp: Boolean(body.includeSingleEp)
 			});
 			const found = profile.pool.find(
 				(item) =>
@@ -276,6 +304,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	const nextStateToken = sealPayload<SealedDailyState>({
 		v: 1,
 		roundId: secret.roundId,
+		dailyDate,
+		scopeKey,
+		playerId,
 		attemptsUsed: attemptNumber,
 		finished,
 		usedKeys: nextUsedKeys
@@ -296,22 +327,20 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 					});
 	}
 
-	if (playerId) {
-		saveDailyRecord(playerId, {
-			date: todayUtc,
-			scopeKey,
-			roundId: secret.roundId,
-			roundToken: body.roundToken,
-			dailyStateToken: nextStateToken,
-			currentImageUrl: nextImageUrl,
-			attempts: [...(serverRecord?.attempts ?? []), attempt],
-			usedKeys: nextUsedKeys,
-			finished,
-			won: attempt.solved,
-			...(finished ? { reveal: secret.reveal } : {}),
-			updatedAt: Date.now()
-		});
-	}
+	saveDailyRecord(playerId, {
+		date: dailyDate,
+		scopeKey,
+		roundId: secret.roundId,
+		roundToken: body.roundToken,
+		dailyStateToken: nextStateToken,
+		currentImageUrl: nextImageUrl,
+		attempts: [...existingAttempts, attempt],
+		usedKeys: nextUsedKeys,
+		finished,
+		won: attempt.solved,
+		...(finished ? { reveal: secret.reveal } : {}),
+		updatedAt: Date.now()
+	});
 
 	const response: WordleGuessResponse = {
 		mode: 'daily',

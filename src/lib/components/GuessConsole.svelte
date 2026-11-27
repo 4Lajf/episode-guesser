@@ -123,6 +123,15 @@
 		}
 	});
 
+	$effect(() => {
+		const idx = activeIndex;
+		if (dropdownOpen && filteredTitles.length > 0 && typeof document !== 'undefined') {
+			tick().then(() => {
+				document.getElementById(`anime-opt-${idx}`)?.scrollIntoView({ block: 'nearest' });
+			});
+		}
+	});
+
 	function splitHighlight(title: string, query: string): [string, string, string] {
 		const q = query.trim();
 		if (!q) return [title, '', ''];

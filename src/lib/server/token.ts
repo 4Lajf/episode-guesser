@@ -13,6 +13,12 @@ function getKey(): Buffer {
 		return cachedKey;
 	}
 
+	if (process.env.NODE_ENV === 'production') {
+		console.warn(
+			'[episode-guesser] WARNING: SESSION_SECRET is not set in production. Tokens will be invalidated across container redeploys without a persistent /app/.cache volume.'
+		);
+	}
+
 	// Persist a local key in .cache/.secret so tokens survive server restarts
 	const cacheDir = join(process.cwd(), '.cache');
 	const secretPath = join(cacheDir, '.secret');

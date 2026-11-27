@@ -14,6 +14,7 @@ export interface AnimeLookupResult {
 	id: number;
 	year: number | null;
 	relatedIds: number[];
+	exactTitleMatch: boolean;
 }
 
 const profileCache = new Map<string, CachedEntry<AniListProfile>>();
@@ -377,14 +378,15 @@ export async function lookupAnimeByTitle(title: string): Promise<AnimeLookupResu
 			.filter((x): x is string => Boolean(x))
 			.map(normalizeTitle);
 
-		const matches = candidates.some(
-			(c) =>
-				c === normQuery ||
-				(normQuery.length >= 4 && (c.includes(normQuery) || normQuery.includes(c)))
-		);
+		const exactTitleMatch = candidates.some((c) => c === normQuery);
+		const fuzzyMatch =
+			exactTitleMatch ||
+			candidates.some(
+				(c) => normQuery.length >= 4 && (c.includes(normQuery) || normQuery.includes(c))
+			);
 
 		let result: AnimeLookupResult | null = null;
-		if (matches) {
+		if (fuzzyMatch) {
 			const relatedIds: number[] = [];
 			for (const edge of media.relations?.edges ?? []) {
 				if (edge.node?.type === 'ANIME' && FRANCHISE_RELATIONS.has(edge.relationType)) {
@@ -394,7 +396,8 @@ export async function lookupAnimeByTitle(title: string): Promise<AnimeLookupResu
 			result = {
 				id: media.id,
 				year: media.seasonYear ?? media.startDate?.year ?? null,
-				relatedIds
+				relatedIds,
+				exactTitleMatch
 			};
 		}
 
