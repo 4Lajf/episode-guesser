@@ -1,0 +1,193 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import type { VnAttemptFeedback, VnReveal } from '$lib/types';
+
+export interface VnDailyServerRecord {
+	date: string;
+	roundId: string;
+	roundToken: string;
+	stateToken: string;
+	currentStage: 1 | 2 | 3 | 4 | 5;
+	currentImageUrl: string;
+	attempts: VnAttemptFeedback[];
+	usedIds: string[];
+	finished: boolean;
+	won: boolean;
+	reveal?: VnReveal;
+	updatedAt: number;
+}
+
+const MAX_RECORDS = 100_000;
+const RECORD_TTL_MS = 400 * 24 * 60 * 60 * 1000;
+const FLUSH_DELAY_MS = 2_000;
+
+const store = new Map<string, VnDailyServerRecord>();
+let hydrated = false;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let flushInFlight = false;
+let dirtyAfterFlush = false;
+let shutdownHooked = false;
+
+function getStoreFile(): string {
+	return process.env.VN_DAILY_STORE_PATH || join(process.cwd(), '.cache', 'vn-daily-store.json');
+}
+
+function isTestMemoryOnly(): boolean {
+	return Boolean(process.env.VITEST) && !process.env.VN_DAILY_STORE_PATH;
+}
+
+function serializeStore(): string {
+	const obj: Record<string, VnDailyServerRecord> = {};
+	for (const [k, v] of store) obj[k] = v;
+	return JSON.stringify(obj);
+}
+
+function flushToDiskSync(): void {
+	if (isTestMemoryOnly()) return;
+	flushTimer = null;
+	try {
+		const storeFile = getStoreFile();
+		mkdirSync(dirname(storeFile), { recursive: true });
+		const tmpPath = `${storeFile}.${process.pid}.tmp`;
+		writeFileSync(tmpPath, serializeStore(), 'utf8');
+		renameSync(tmpPath, storeFile);
+	} catch {
+		// non-fatal
+	}
+}
+
+async function flushToDiskAsync(): Promise<void> {
+	if (isTestMemoryOnly()) return;
+	flushTimer = null;
+	if (flushInFlight) {
+		dirtyAfterFlush = true;
+		return;
+	}
+	flushInFlight = true;
+	try {
+		const storeFile = getStoreFile();
+		await mkdir(dirname(storeFile), { recursive: true });
+		const tmpPath = `${storeFile}.${process.pid}.tmp`;
+		await writeFile(tmpPath, serializeStore(), 'utf8');
+		await rename(tmpPath, storeFile);
+	} catch (err) {
+		console.error('[vnDailyStore] failed to persist to disk:', err);
+	} finally {
+		flushInFlight = false;
+		if (dirtyAfterFlush) {
+			dirtyAfterFlush = false;
+			schedulePersist();
+		}
+	}
+}
+
+function ensureShutdownHooks(): void {
+	if (shutdownHooked || isTestMemoryOnly()) return;
+	shutdownHooked = true;
+	const flushOnExit = () => {
+		if (flushTimer || dirtyAfterFlush) {
+			if (flushTimer) clearTimeout(flushTimer);
+			flushToDiskSync();
+		}
+	};
+	process.once('SIGTERM', flushOnExit);
+	process.once('SIGINT', flushOnExit);
+	process.once('beforeExit', flushOnExit);
+}
+
+function hydrateFromDisk(): void {
+	if (hydrated) return;
+	hydrated = true;
+	if (isTestMemoryOnly()) return;
+	try {
+		const storeFile = getStoreFile();
+		if (!existsSync(storeFile)) return;
+		const parsed = JSON.parse(readFileSync(storeFile, 'utf8')) as Record<
+			string,
+			VnDailyServerRecord
+		>;
+		const now = Date.now();
+		for (const [k, v] of Object.entries(parsed)) {
+			if (
+				v &&
+				typeof v.updatedAt === 'number' &&
+				Array.isArray(v.attempts) &&
+				v.attempts.length > 0 &&
+				now - v.updatedAt <= RECORD_TTL_MS
+			) {
+				store.set(k, v);
+			}
+		}
+	} catch {
+		// ignore corrupt disk store
+	}
+}
+
+function schedulePersist(): void {
+	if (isTestMemoryOnly()) return;
+	ensureShutdownHooks();
+	if (flushTimer) return;
+	flushTimer = setTimeout(() => {
+		void flushToDiskAsync();
+	}, FLUSH_DELAY_MS);
+	if (typeof flushTimer === 'object' && 'unref' in flushTimer) {
+		flushTimer.unref();
+	}
+}
+
+function makeKey(playerId: string, date: string): string {
+	return `${playerId}|${date}`;
+}
+
+function pruneOld(): void {
+	const now = Date.now();
+	for (const [k, v] of store) {
+		if (now - v.updatedAt > RECORD_TTL_MS) store.delete(k);
+	}
+	while (store.size >= MAX_RECORDS) {
+		const first = store.keys().next().value;
+		if (!first) break;
+		store.delete(first);
+	}
+}
+
+export function getVnDailyRecord(playerId: string, date: string): VnDailyServerRecord | null {
+	hydrateFromDisk();
+	const key = makeKey(playerId, date);
+	const rec = store.get(key);
+	if (!rec) return null;
+	if (Date.now() - rec.updatedAt > RECORD_TTL_MS) {
+		store.delete(key);
+		return null;
+	}
+	return rec;
+}
+
+export function saveVnDailyRecord(playerId: string, record: VnDailyServerRecord): void {
+	if (!record.finished && record.attempts.length === 0) return;
+	hydrateFromDisk();
+	pruneOld();
+	const key = makeKey(playerId, record.date);
+	store.set(key, { ...record, updatedAt: Date.now() });
+	if (record.finished) {
+		ensureShutdownHooks();
+		if (flushTimer) {
+			clearTimeout(flushTimer);
+			flushTimer = null;
+		}
+		void flushToDiskAsync();
+	} else {
+		schedulePersist();
+	}
+}
+
+export function clearVnDailyStoreForTests(): void {
+	if (flushTimer) {
+		clearTimeout(flushTimer);
+		flushTimer = null;
+	}
+	dirtyAfterFlush = false;
+	store.clear();
+	hydrated = true;
+}

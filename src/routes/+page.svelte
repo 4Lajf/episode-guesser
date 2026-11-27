@@ -13,6 +13,7 @@
 	import RoundReveal from '$lib/components/RoundReveal.svelte';
 	import SessionBar from '$lib/components/SessionBar.svelte';
 	import UnlimitedSummary from '$lib/components/UnlimitedSummary.svelte';
+	import VnUiGame from '$lib/components/VnUiGame.svelte';
 	import {
 		CLASSIC_ROUNDS,
 		CURATED_POOL_SIZE,
@@ -649,6 +650,13 @@
 			loadArchive();
 			return;
 		}
+		if (nextTab === 'vn') {
+			activeTab = 'vn';
+			syncUrlState('vn');
+			roundError = null;
+			guessInlineError = null;
+			return;
+		}
 		activeTab = nextTab;
 		switchMode(nextTab);
 	}
@@ -970,6 +978,9 @@
 			selectedDailyDate = urlDate;
 			mode = 'daily';
 			activeTab = 'daily';
+		} else if (urlMode === 'vn') {
+			activeTab = 'vn';
+			mode = 'daily';
 		} else if (urlMode === 'archive') {
 			activeTab = 'archive';
 			mode = 'daily';
@@ -1062,7 +1073,7 @@
 				</div>
 			</div>
 		</div>
-	{:else if !authUser && !profileLoading && !nudgeDismissed}
+	{:else if !authUser && !profileLoading && !nudgeDismissed && activeTab !== 'vn'}
 		<div class="shell nudge-wrap">
 			<div class="anilist-nudge">
 				<span class="nudge-copy">
@@ -1089,7 +1100,7 @@
 		</div>
 	{/if}
 
-	{#if activeTab !== 'archive'}
+	{#if activeTab !== 'archive' && activeTab !== 'vn'}
 		<SessionBar
 			{mode}
 			{classicRoundIndex}
@@ -1121,7 +1132,9 @@
 
 	<main class="stage">
 		<h1 class="sr-only">
-			{#if activeTab === 'archive'}
+			{#if activeTab === 'vn'}
+				Visual Novel Interface Wordle
+			{:else if activeTab === 'archive'}
 				Daily Frame Archive
 			{:else if mode === 'classic'}
 				Classic game, round {Math.min(classicRoundIndex + 1, CLASSIC_ROUNDS)} of {CLASSIC_ROUNDS}
@@ -1132,7 +1145,7 @@
 			{/if}
 		</h1>
 
-		{#if roundNotice}
+		{#if roundNotice && activeTab !== 'vn'}
 			<div class="shell">
 				<div class="anilist-nudge" role="status">
 					<span>{roundNotice}</span>
@@ -1143,7 +1156,7 @@
 			</div>
 		{/if}
 
-		{#if roundError}
+		{#if roundError && activeTab !== 'vn'}
 			<div class="shell">
 				<div class="error-banner" role="alert">
 					<span>{roundError}</span>
@@ -1154,7 +1167,16 @@
 			</div>
 		{/if}
 
-		{#if activeTab === 'archive'}
+		{#if activeTab === 'vn'}
+			<div class="shell">
+				<VnUiGame
+					onZoom={(url) => {
+						lightboxImage = url;
+						lightboxOpen = true;
+					}}
+				/>
+			</div>
+		{:else if activeTab === 'archive'}
 			<div class="shell">
 				<DailyArchive
 					{archive}

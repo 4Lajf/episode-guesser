@@ -5,7 +5,7 @@ import {
 	isAllowedImageUrl,
 	MAX_IMAGE_BYTES
 } from '$lib/server/imageHost';
-import type { CropSpec, SealedImageSecret } from '$lib/server/picker';
+import type { CropSpec, SealedImageSecret, VnUiCropSpec } from '$lib/server/picker';
 import { unsealPayload } from '$lib/server/token';
 import type { RequestHandler } from './$types';
 
@@ -22,7 +22,10 @@ interface CachedImageResponse {
 // share cached Global Daily & common episode frames without re-fetching from TVDB.
 const renderedCache = new Map<string, CachedImageResponse>();
 
-function makeCacheKey(url: string, crop?: CropSpec): string {
+function makeCacheKey(url: string, crop?: CropSpec, vnUi?: VnUiCropSpec): string {
+	if (vnUi && vnUi.stage < 5) {
+		return `${url}|vn|${vnUi.stage}|${vnUi.isNvl ? 1 : 0}`;
+	}
 	if (!crop || crop.scale <= 1.01) return `${url}|full`;
 	return `${url}|${crop.scale.toFixed(2)}|${Math.round(crop.originX)}|${Math.round(crop.originY)}`;
 }
@@ -147,6 +150,77 @@ async function applyServerCrop(buffer: Buffer, crop: CropSpec): Promise<Buffer> 
 	return pipeline.jpeg({ quality: 90, mozjpeg: true }).toBuffer();
 }
 
+async function applyVnUiStage(buffer: Buffer, vnUi: VnUiCropSpec): Promise<Buffer> {
+	const image = sharp(buffer, { failOn: 'none' });
+	const meta = await image.metadata();
+	const w = meta.width ?? 0;
+	const h = meta.height ?? 0;
+	if (w < 64 || h < 64 || vnUi.stage >= 5) return buffer;
+
+	const fracMap: Record<1 | 2 | 3 | 4, number> = vnUi.isNvl
+		? { 1: 0.38, 2: 0.46, 3: 0.6, 4: 0.8 }
+		: { 1: 0.28, 2: 0.34, 3: 0.56, 4: 0.78 };
+	const stripH = Math.min(h, Math.max(48, Math.round(h * fracMap[vnUi.stage as 1 | 2 | 3 | 4])));
+	const top = Math.max(0, h - stripH);
+
+	const stripBuf = await image
+		.extract({ left: 0, top, width: w, height: stripH })
+		.toBuffer();
+
+	let composed = sharp(stripBuf, { failOn: 'none' });
+
+	// Stage 1: frost interior dialogue zone (+ ADV nameplate tab) while keeping UI borders, corners, buttons, and frame edges crisp
+	if (vnUi.stage === 1) {
+		const overlays: Array<{ input: Buffer; left: number; top: number }> = [];
+		const maskLeft = Math.min(w - 16, Math.round(w * (vnUi.isNvl ? 0.08 : 0.09)));
+		const maskTop = Math.min(stripH - 16, Math.round(stripH * (vnUi.isNvl ? 0.12 : 0.16)));
+		const maskW = Math.min(w - maskLeft, Math.max(16, Math.round(w * (vnUi.isNvl ? 0.84 : 0.82))));
+		const maskH = Math.min(
+			stripH - maskTop,
+			Math.max(16, Math.round(stripH * (vnUi.isNvl ? 0.72 : 0.68)))
+		);
+		const sigma = Math.min(28, Math.max(8, Math.round(stripH * 0.06)));
+		const blurredPatch = await sharp(stripBuf, { failOn: 'none' })
+			.extract({ left: maskLeft, top: maskTop, width: maskW, height: maskH })
+			.blur(sigma)
+			.toBuffer();
+		overlays.push({ input: blurredPatch, left: maskLeft, top: maskTop });
+
+		if (!vnUi.isNvl) {
+			const nameLeft = Math.min(w - 16, Math.round(w * 0.04));
+			const nameW = Math.min(w - nameLeft, Math.max(16, Math.round(w * 0.34)));
+			const nameH = Math.min(stripH, Math.max(16, Math.round(stripH * 0.24)));
+			const blurredName = await sharp(stripBuf, { failOn: 'none' })
+				.extract({ left: nameLeft, top: 0, width: nameW, height: nameH })
+				.blur(sigma)
+				.toBuffer();
+			overlays.push({ input: blurredName, left: nameLeft, top: 0 });
+		}
+
+		composed = composed.composite(overlays);
+	} else if (vnUi.stage === 2 && !vnUi.isNvl) {
+		// Stage 2 (ADV): crisp UI + typography, only soften the top-left speaker nameplate area
+		const maskLeft = Math.min(w - 16, Math.round(w * 0.03));
+		const maskTop = Math.min(stripH - 16, Math.round(stripH * 0.04));
+		const maskW = Math.min(w - maskLeft, Math.max(16, Math.round(w * 0.34)));
+		const maskH = Math.min(stripH - maskTop, Math.max(16, Math.round(stripH * 0.30)));
+		const sigma = Math.min(22, Math.max(7, Math.round(stripH * 0.048)));
+		const blurredNameplate = await sharp(stripBuf, { failOn: 'none' })
+			.extract({ left: maskLeft, top: maskTop, width: maskW, height: maskH })
+			.blur(sigma)
+			.toBuffer();
+		composed = composed.composite([{ input: blurredNameplate, left: maskLeft, top: maskTop }]);
+	}
+
+	if (w < 960) {
+		composed = composed
+			.resize({ width: 960, kernel: 'lanczos3', withoutEnlargement: false })
+			.sharpen({ sigma: 0.5 });
+	}
+
+	return composed.jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+}
+
 export const GET: RequestHandler = async ({ params }) => {
 	const secret = unsealPayload<SealedImageSecret>(params.token);
 	if (!secret || secret.typ !== 'image' || !secret.url || secret.exp < Date.now()) {
@@ -157,7 +231,7 @@ export const GET: RequestHandler = async ({ params }) => {
 		throw error(403, 'Disallowed upstream image host');
 	}
 
-	const cacheKey = makeCacheKey(secret.url, secret.crop);
+	const cacheKey = makeCacheKey(secret.url, secret.crop, secret.vnUi);
 	const cached = renderedCache.get(cacheKey);
 	if (cached && cached.expiresAt > Date.now()) {
 		return new Response(new Uint8Array(cached.bytes), {
@@ -179,7 +253,14 @@ export const GET: RequestHandler = async ({ params }) => {
 		let outBuffer = buffer;
 		let outMime = contentType;
 
-		if (secret.crop && secret.crop.scale > 1.01) {
+		if (secret.vnUi && secret.vnUi.stage < 5) {
+			try {
+				outBuffer = await applyVnUiStage(buffer, secret.vnUi);
+				outMime = 'image/jpeg';
+			} catch {
+				throw error(502, 'Could not render VN interface frame');
+			}
+		} else if (secret.crop && secret.crop.scale > 1.01) {
 			try {
 				outBuffer = await applyServerCrop(buffer, secret.crop);
 				outMime = 'image/jpeg';

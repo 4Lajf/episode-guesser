@@ -14,11 +14,17 @@ export interface CropSpec {
 	originY: number;
 }
 
+export interface VnUiCropSpec {
+	stage: 1 | 2 | 3 | 4 | 5;
+	isNvl: boolean;
+}
+
 export interface SealedImageSecret {
 	typ: 'image';
 	url: string;
 	exp: number;
 	crop?: CropSpec;
+	vnUi?: VnUiCropSpec;
 }
 
 export interface SealedRoundSecret {
@@ -58,6 +64,16 @@ export function mintImageUrl(rawUrl: string, crop?: CropSpec): string {
 		url: rawUrl,
 		exp: Date.now() + IMAGE_TOKEN_TTL_MS,
 		...(crop && crop.scale > 1.01 ? { crop } : {})
+	});
+	return `/api/image/${token}`;
+}
+
+export function mintVnImageUrl(rawUrl: string, stage: 1 | 2 | 3 | 4 | 5, isNvl: boolean): string {
+	const token = sealPayload<SealedImageSecret>({
+		typ: 'image',
+		url: rawUrl,
+		exp: Date.now() + IMAGE_TOKEN_TTL_MS,
+		...(stage < 5 ? { vnUi: { stage, isNvl } } : {})
 	});
 	return `/api/image/${token}`;
 }

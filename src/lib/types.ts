@@ -1,6 +1,80 @@
 export type GameMode = 'classic' | 'unlimited' | 'daily';
 
-export type NavTab = GameMode | 'archive';
+export type NavTab = GameMode | 'archive' | 'vn';
+
+export type VnUiSubMode = 'daily' | 'practice';
+
+export interface VnAutocompleteEntry {
+	id: string;
+	t: string;
+	a?: string;
+	s?: string[];
+}
+
+export interface VnReveal {
+	id: string;
+	title: string;
+	enTitle: string | null;
+	year: number;
+	released: string;
+	lengthMinutes: number;
+	lengthBucket: number;
+	rating: number | null;
+	developers: string[];
+	isNvl: boolean;
+	tags: string[];
+	imageUrl: string;
+	vndbUrl: string;
+}
+
+export interface VnAttemptFeedback {
+	attemptNumber: number;
+	guessedId: string | null;
+	guessedTitle: string;
+	guessedYear: number | null;
+	guessedLengthMinutes: number | null;
+	guessedStudio: string | null;
+	vnStatus: TileStatus;
+	yearStatus: TileStatus;
+	yearDirection: Direction;
+	lengthStatus: TileStatus;
+	lengthDirection: Direction;
+	studioStatus: TileStatus;
+	solved: boolean;
+	gaveUp?: boolean;
+}
+
+export interface VnRoundPayload {
+	roundToken: string;
+	stateToken: string;
+	imageUrl: string;
+	subMode: VnUiSubMode;
+	stage: number;
+	maxAttempts: number;
+	isNvl: boolean;
+	hintTags?: string[];
+	dailyMeta?: {
+		date: string;
+		puzzleNumber: number;
+	};
+	restore?: {
+		attempts: VnAttemptFeedback[];
+		finished: boolean;
+		won: boolean;
+		reveal?: VnReveal;
+	};
+}
+
+export interface VnGuessResponse {
+	attempt: VnAttemptFeedback;
+	finished: boolean;
+	won: boolean;
+	nextStage: number;
+	nextImageUrl: string;
+	stateToken: string;
+	hintTags?: string[];
+	reveal?: VnReveal;
+}
 
 export type ListStatus = 'COMPLETED' | 'CURRENT' | 'PAUSED' | 'DROPPED' | 'REPEATING';
 

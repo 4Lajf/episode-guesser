@@ -84,7 +84,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 		pathname.startsWith('/api/round') ||
 		pathname.startsWith('/api/anilist') ||
 		pathname.startsWith('/api/guess') ||
-		pathname.startsWith('/api/autocomplete')
+		pathname.startsWith('/api/autocomplete') ||
+		pathname.startsWith('/api/vn/')
 	) {
 		const ip = getTrustedClientIp(event);
 		const { allowed, retryAfterSec } = consumeToken(apiBuckets, ip, API_LIMIT);

@@ -3,7 +3,8 @@ export const ALLOWED_IMAGE_HOSTS = new Set([
 	'thetvdb.com',
 	'www.thetvdb.com',
 	'image.tmdb.org',
-	's4.anilist.co'
+	's4.anilist.co',
+	't.vndb.org'
 ]);
 
 export const ALLOWED_IMAGE_MIMES = new Set([

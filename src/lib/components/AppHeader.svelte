@@ -53,7 +53,8 @@
 		{ id: 'daily', label: 'Daily frame' },
 		{ id: 'archive', label: 'Archive' },
 		{ id: 'classic', label: 'Classic' },
-		{ id: 'unlimited', label: 'Unlimited' }
+		{ id: 'unlimited', label: 'Unlimited' },
+		{ id: 'vn', label: 'VN UI' }
 	];
 </script>
 
@@ -367,14 +368,14 @@
 		.modes {
 			grid-area: modes;
 			display: grid;
-			grid-template-columns: repeat(4, minmax(0, 1fr));
+			grid-template-columns: repeat(5, minmax(0, 1fr));
 			height: 42px;
 		}
 
 		.mode-tab {
 			justify-content: center;
-			padding: 0 4px;
-			font-size: 14px;
+			padding: 0 3px;
+			font-size: 13px;
 		}
 	}
 </style>
