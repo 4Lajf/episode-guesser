@@ -1,13 +1,15 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { normalizeTitle } from '$lib/scoring';
+	import type { AutocompleteEntry } from '$lib/types';
 
 	interface Props {
-		titles: string[];
+		entries: AutocompleteEntry[];
 		submitting: boolean;
 		disabled?: boolean;
 		skipLabel?: string;
 		confirmSkip?: boolean;
+		confirmSkipLabel?: string;
 		submitLabel?: string;
 		scoringNote?: string;
 		lockedAnimeTitle?: string;
@@ -22,11 +24,12 @@
 	}
 
 	let {
-		titles,
+		entries,
 		submitting,
 		disabled = false,
 		skipLabel = 'Skip frame',
 		confirmSkip = false,
+		confirmSkipLabel = 'Confirm give up?',
 		submitLabel = 'Lock in guess',
 		scoringNote = '',
 		lockedAnimeTitle = '',
@@ -52,13 +55,36 @@
 
 	const isLockedAnime = $derived(Boolean(lockedAnimeTitle));
 
-	const indexedTitles = $derived(
-		titles.map((raw) => ({
-			raw,
-			lower: raw.toLowerCase(),
-			norm: normalizeTitle(raw)
+	const indexedEntries = $derived(
+		entries.map((entry) => ({
+			entry,
+			tLower: entry.t.toLowerCase(),
+			tNorm: normalizeTitle(entry.t),
+			aLower: entry.a ? entry.a.toLowerCase() : '',
+			aNorm: entry.a ? normalizeTitle(entry.a) : '',
+			sNorms: entry.s ? entry.s.map((x) => normalizeTitle(x)).filter(Boolean) : []
 		}))
 	);
+
+	// Shows episode count strictly for the show the player typed/picked (global catalog only — never leaks target).
+	const selectedEntryEp = $derived.by(() => {
+		const raw = (isLockedAnime ? lockedAnimeTitle : titleQuery).trim();
+		if (!raw) return null;
+		const lower = raw.toLowerCase();
+		const norm = normalizeTitle(raw);
+		for (let i = 0; i < indexedEntries.length; i++) {
+			const item = indexedEntries[i];
+			if (
+				item.tLower === lower ||
+				(norm && item.tNorm === norm) ||
+				(item.aLower && item.aLower === lower) ||
+				(norm && item.aNorm === norm)
+			) {
+				return item.entry.ep && item.entry.ep > 0 ? item.entry.ep : null;
+			}
+		}
+		return null;
+	});
 
 	function clampEpisode(v: number): number {
 		const lo = Math.max(1, minEpisode);
@@ -117,56 +143,116 @@
 		}
 	});
 
+	function isWordStart(haystack: string, idx: number): boolean {
+		if (idx <= 0) return idx === 0;
+		const prev = haystack[idx - 1];
+		return prev === ' ' || prev === ':' || prev === '-' || prev === '/' || prev === '(';
+	}
+
 	const searchResult = $derived.by(() => {
 		const rawQ = titleQuery.trim().toLowerCase();
 		const normQ = normalizeTitle(titleQuery);
-		if (!rawQ && !normQ) return { items: [] as string[], total: 0 };
+		if (!rawQ && !normQ) return { items: [] as AutocompleteEntry[], total: 0 };
 
-		const exactOrPrefix: string[] = [];
-		const wordStarts: string[] = [];
-		const contains: string[] = [];
+		const buckets: AutocompleteEntry[][] = [[], [], [], [], [], [], []];
 
-		for (let i = 0; i < indexedTitles.length; i++) {
-			const item = indexedTitles[i];
-			const normIdx = normQ ? item.norm.indexOf(normQ) : -1;
-			const rawIdx = rawQ ? item.lower.indexOf(rawQ) : -1;
+		for (let i = 0; i < indexedEntries.length; i++) {
+			const item = indexedEntries[i];
+			const tRawIdx = rawQ ? item.tLower.indexOf(rawQ) : -1;
+			const tNormIdx = normQ ? item.tNorm.indexOf(normQ) : -1;
+			const aRawIdx = rawQ && item.aLower ? item.aLower.indexOf(rawQ) : -1;
+			const aNormIdx = normQ && item.aNorm ? item.aNorm.indexOf(normQ) : -1;
 
-			if (normIdx === -1 && rawIdx === -1) continue;
+			let sExactOrPrefix = false;
+			let sContains = false;
+			if (normQ && item.sNorms.length > 0 && tRawIdx === -1 && tNormIdx === -1 && aRawIdx === -1 && aNormIdx === -1) {
+				for (let j = 0; j < item.sNorms.length; j++) {
+					const s = item.sNorms[j];
+					if (s === normQ || s.startsWith(normQ)) {
+						sExactOrPrefix = true;
+						break;
+					}
+					if (s.includes(normQ)) {
+						sContains = true;
+					}
+				}
+			}
 
-			if (normIdx === 0 || rawIdx === 0) {
-				exactOrPrefix.push(item.raw);
-			} else if (
-				(normIdx > 0 && item.norm[normIdx - 1] === ' ') ||
-				(rawIdx > 0 &&
-					(item.lower[rawIdx - 1] === ' ' ||
-						item.lower[rawIdx - 1] === ':' ||
-						item.lower[rawIdx - 1] === '-'))
+			if (
+				tRawIdx === -1 &&
+				tNormIdx === -1 &&
+				aRawIdx === -1 &&
+				aNormIdx === -1 &&
+				!sExactOrPrefix &&
+				!sContains
 			) {
-				wordStarts.push(item.raw);
+				continue;
+			}
+
+			// Tier 0: exact raw display match (e.g. "Hunter x Hunter (2011)" always #1)
+			if (rawQ && item.tLower === rawQ) {
+				buckets[0].push(item.entry);
+			} else if (
+				(normQ && item.tNorm === normQ) ||
+				(rawQ && item.aLower === rawQ) ||
+				(normQ && item.aNorm === normQ)
+			) {
+				// Tier 1: exact normalized display or exact English alias
+				buckets[1].push(item.entry);
+			} else if (tRawIdx === 0) {
+				// Tier 2: display raw prefix
+				buckets[2].push(item.entry);
+			} else if (tNormIdx === 0) {
+				// Tier 3: display normalized prefix
+				buckets[3].push(item.entry);
+			} else if (aRawIdx === 0 || aNormIdx === 0) {
+				// Tier 4: English alias prefix
+				buckets[4].push(item.entry);
+			} else if (
+				isWordStart(item.tLower, tRawIdx) ||
+				isWordStart(item.tNorm, tNormIdx) ||
+				isWordStart(item.aLower, aRawIdx) ||
+				isWordStart(item.aNorm, aNormIdx) ||
+				sExactOrPrefix
+			) {
+				// Tier 5: word-start or nickname prefix
+				buckets[5].push(item.entry);
 			} else {
-				contains.push(item.raw);
+				// Tier 6: substring match
+				buckets[6].push(item.entry);
 			}
 		}
 
-		exactOrPrefix.sort((a, b) => a.length - b.length);
-		wordStarts.sort((a, b) => a.length - b.length);
+		for (let b = 0; b < buckets.length; b++) {
+			if (buckets[b].length > 1) {
+				buckets[b].sort((a, c) => a.t.length - c.t.length || a.t.localeCompare(c.t));
+			}
+		}
 
-		const all = [...exactOrPrefix, ...wordStarts, ...contains];
-		return { items: all.slice(0, 10), total: all.length };
+		let total = 0;
+		const items: AutocompleteEntry[] = [];
+		for (let b = 0; b < buckets.length; b++) {
+			total += buckets[b].length;
+			if (items.length < 8) {
+				const need = 8 - items.length;
+				items.push(...buckets[b].slice(0, need));
+			}
+		}
+		return { items, total };
 	});
 
-	const filteredTitles = $derived(searchResult.items);
+	const filteredEntries = $derived(searchResult.items);
 	const totalMatches = $derived(searchResult.total);
 
 	$effect(() => {
-		if (activeIndex >= filteredTitles.length) {
+		if (activeIndex >= filteredEntries.length) {
 			activeIndex = 0;
 		}
 	});
 
 	$effect(() => {
 		const idx = activeIndex;
-		if (dropdownOpen && filteredTitles.length > 0 && typeof document !== 'undefined') {
+		if (dropdownOpen && filteredEntries.length > 0 && typeof document !== 'undefined') {
 			tick().then(() => {
 				document.getElementById(`anime-opt-${idx}`)?.scrollIntoView({ block: 'nearest' });
 			});
@@ -181,8 +267,8 @@
 		return [title.slice(0, idx), title.slice(idx, idx + q.length), title.slice(idx + q.length)];
 	}
 
-	function selectTitle(title: string) {
-		titleQuery = title;
+	function selectEntry(entry: AutocompleteEntry) {
+		titleQuery = entry.t;
 		dropdownOpen = false;
 		activeIndex = 0;
 		tick().then(() => {
@@ -205,20 +291,20 @@
 	function handleTitleKeydown(e: KeyboardEvent) {
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			if (filteredTitles.length > 0) {
+			if (filteredEntries.length > 0) {
 				dropdownOpen = true;
-				activeIndex = (activeIndex + 1) % filteredTitles.length;
+				activeIndex = (activeIndex + 1) % filteredEntries.length;
 			}
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			if (filteredTitles.length > 0) {
+			if (filteredEntries.length > 0) {
 				dropdownOpen = true;
-				activeIndex = (activeIndex - 1 + filteredTitles.length) % filteredTitles.length;
+				activeIndex = (activeIndex - 1 + filteredEntries.length) % filteredEntries.length;
 			}
 		} else if (e.key === 'Enter') {
-			if (dropdownOpen && filteredTitles.length > 0) {
+			if (dropdownOpen && filteredEntries.length > 0) {
 				e.preventDefault();
-				selectTitle(filteredTitles[activeIndex] ?? filteredTitles[0]);
+				selectEntry(filteredEntries[activeIndex] ?? filteredEntries[0]);
 			} else if (titleQuery.trim()) {
 				e.preventDefault();
 				episodeInputEl?.focus();
@@ -333,6 +419,9 @@
 		</div>
 
 		<div class="locked-secondary">
+			{#if selectedEntryEp}
+				<span class="locked-ep-meta tnum">{selectedEntryEp} {selectedEntryEp === 1 ? 'episode' : 'episodes'} total</span>
+			{/if}
 			<button
 				type="button"
 				class="quiet small"
@@ -340,7 +429,7 @@
 				disabled={disabled || submitting}
 				onclick={handleSkipClick}
 			>
-				{armedSkip ? 'Confirm give up?' : skipLabel}
+				{armedSkip ? confirmSkipLabel : skipLabel}
 			</button>
 		</div>
 	{:else}
@@ -361,11 +450,11 @@
 						type="text"
 						role="combobox"
 						aria-autocomplete="list"
-						aria-expanded={dropdownOpen && filteredTitles.length > 0}
-						aria-controls={dropdownOpen && filteredTitles.length > 0
+						aria-expanded={dropdownOpen && filteredEntries.length > 0}
+						aria-controls={dropdownOpen && filteredEntries.length > 0
 							? 'anime-title-listbox'
 							: undefined}
-						aria-activedescendant={dropdownOpen && filteredTitles.length > 0
+						aria-activedescendant={dropdownOpen && filteredEntries.length > 0
 							? `anime-opt-${activeIndex}`
 							: undefined}
 						spellcheck="false"
@@ -404,7 +493,7 @@
 					{/if}
 				</div>
 
-				{#if dropdownOpen && filteredTitles.length > 0}
+				{#if dropdownOpen && filteredEntries.length > 0}
 					<div class="combo-panel">
 						<div
 							id="anime-title-listbox"
@@ -412,8 +501,8 @@
 							role="listbox"
 							aria-label="Matching titles"
 						>
-							{#each filteredTitles as item, idx (item)}
-								{@const [before, match, after] = splitHighlight(item, titleQuery)}
+							{#each filteredEntries as item, idx (item.t)}
+								{@const [before, match, after] = splitHighlight(item.t, titleQuery)}
 								<button
 									type="button"
 									tabindex="-1"
@@ -422,12 +511,18 @@
 									aria-selected={idx === activeIndex}
 									class="match-opt"
 									onmousedown={(e) => e.preventDefault()}
-									onclick={() => selectTitle(item)}
+									onclick={() => selectEntry(item)}
 									onmouseenter={() => (activeIndex = idx)}
 								>
 									<span class="t">
 										{before}{#if match}<mark>{match}</mark>{/if}{after}
 									</span>
+									{#if item.a}
+										{@const [aBefore, aMatch, aAfter] = splitHighlight(item.a, titleQuery)}
+										<span class="sub">
+											{aBefore}{#if aMatch}<mark>{aMatch}</mark>{/if}{aAfter}
+										</span>
+									{/if}
 								</button>
 							{/each}
 						</div>
@@ -436,7 +531,7 @@
 							<span class="key-hint">Enter picks the highlighted title</span>
 						</div>
 					</div>
-				{:else if dropdownOpen && titleQuery.trim().length >= 2 && filteredTitles.length === 0}
+				{:else if dropdownOpen && titleQuery.trim().length >= 2 && filteredEntries.length === 0}
 					<div class="combo-panel empty-pop" role="status">
 						No catalog match — press Enter to submit as typed
 					</div>
@@ -446,7 +541,12 @@
 
 		<!-- Episode Stepper -->
 		<div class="field">
-			<label for="episode-input">Episode</label>
+			<div class="field-head">
+				<label for="episode-input">Episode</label>
+				{#if selectedEntryEp}
+					<span class="ep-cap tnum">{selectedEntryEp} {selectedEntryEp === 1 ? 'episode' : 'episodes'}</span>
+				{/if}
+			</div>
 			<div class="stepper">
 				<button
 					type="button"
@@ -518,7 +618,7 @@
 				disabled={disabled || submitting}
 				onclick={handleSkipClick}
 			>
-				{armedSkip ? 'Confirm give up?' : skipLabel}
+				{armedSkip ? confirmSkipLabel : skipLabel}
 			</button>
 		</div>
 
@@ -556,10 +656,23 @@
 		gap: 8px;
 	}
 
-	.field > label {
+	.field > label,
+	.field-head label {
 		font-size: 14px;
 		font-weight: 600;
 		color: var(--text-2);
+	}
+
+	.field-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.ep-cap {
+		font-size: 13px;
+		color: var(--text-3);
 	}
 
 	.title-field {
@@ -630,7 +743,7 @@
 	}
 
 	.matches {
-		max-height: 204px;
+		max-height: 224px;
 		overflow-y: auto;
 	}
 
@@ -639,8 +752,10 @@
 		border: 0;
 		background: none;
 		text-align: left;
-		display: block;
-		padding: 9px 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: 8px 14px;
 		cursor: pointer;
 		border-bottom: 1px solid var(--line-soft);
 		transition: background-color 100ms ease;
@@ -656,10 +771,19 @@
 		font-weight: 550;
 		color: var(--text-2);
 		overflow-wrap: anywhere;
-		line-height: 1.35;
+		line-height: 1.3;
 	}
 
-	.match-opt .t mark {
+	.match-opt .sub {
+		display: block;
+		font-size: 12.5px;
+		color: var(--text-3);
+		overflow-wrap: anywhere;
+		line-height: 1.25;
+	}
+
+	.match-opt .t mark,
+	.match-opt .sub mark {
 		background: none;
 		color: var(--paper);
 		font-weight: 700;
@@ -706,7 +830,19 @@
 	}
 
 	.stepper.compact-stepper {
-		grid-template-columns: 44px minmax(0, 1fr) 44px;
+		grid-template-columns: 42px minmax(0, 1fr) 42px;
+	}
+
+	.compact-stepper .ep-val {
+		gap: 5px;
+	}
+
+	.compact-stepper .ep-val span {
+		font-size: 12.5px;
+	}
+
+	.compact-stepper .ep-val input {
+		font-size: 21px;
 	}
 
 	.step-btn {
@@ -772,14 +908,25 @@
 
 	.daily-console {
 		display: grid;
-		grid-template-columns: 158px minmax(0, 1fr);
+		grid-template-columns: 180px minmax(0, 1fr);
 		gap: 8px;
 	}
 
 	.locked-secondary {
 		display: flex;
-		justify-content: flex-end;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
 		margin-top: -10px;
+	}
+
+	.locked-secondary:not(:has(.locked-ep-meta)) {
+		justify-content: flex-end;
+	}
+
+	.locked-ep-meta {
+		font-size: 13px;
+		color: var(--text-3);
 	}
 
 	.primary {
@@ -879,7 +1026,7 @@
 		}
 
 		.daily-console {
-			grid-template-columns: 144px minmax(0, 1fr);
+			grid-template-columns: 160px minmax(0, 1fr);
 		}
 	}
 </style>

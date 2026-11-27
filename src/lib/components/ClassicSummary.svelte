@@ -1,31 +1,62 @@
 <script lang="ts">
-	import { buildClassicShareText, getClassicRank } from '$lib/scoring';
+	import { buildClassicShareText, getClassicRank, getNextClassicRankHint } from '$lib/scoring';
 	import type { CompletedClassicRound } from '$lib/types';
 
 	interface Props {
 		username: string;
 		rounds: CompletedClassicRound[];
+		dailyFinished?: boolean;
 		onPlayAgain: () => void;
 		onSwitchDaily: () => void;
+		onSwitchUnlimited?: () => void;
 	}
 
-	let { username, rounds, onPlayAgain, onSwitchDaily }: Props = $props();
+	let {
+		username,
+		rounds,
+		dailyFinished = false,
+		onPlayAgain,
+		onSwitchDaily,
+		onSwitchUnlimited
+	}: Props = $props();
 
 	let copied = $state(false);
 
 	const totalScore = $derived(rounds.reduce((sum, r) => sum + r.result.totalPoints, 0));
 	const maxScore = $derived(rounds.length * 1000);
 	const rank = $derived(getClassicRank(totalScore, maxScore));
+	const nextRankHint = $derived(getNextClassicRankHint(totalScore, maxScore));
 	const animeHits = $derived(rounds.filter((r) => r.result.animeMatch === 'exact').length);
 
 	async function copySummary() {
 		const text = buildClassicShareText({ username, rounds });
-		try {
-			await navigator.clipboard.writeText(text);
+		let ok = false;
+		if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+			try {
+				await navigator.clipboard.writeText(text);
+				ok = true;
+			} catch {
+				// fallback below
+			}
+		}
+		if (!ok && typeof document !== 'undefined') {
+			try {
+				const ta = document.createElement('textarea');
+				ta.value = text;
+				ta.setAttribute('readonly', '');
+				ta.style.position = 'fixed';
+				ta.style.opacity = '0';
+				document.body.appendChild(ta);
+				ta.select();
+				ok = document.execCommand('copy');
+				document.body.removeChild(ta);
+			} catch {
+				ok = false;
+			}
+		}
+		if (ok) {
 			copied = true;
 			setTimeout(() => (copied = false), 2200);
-		} catch {
-			// ignore
 		}
 	}
 </script>
@@ -33,7 +64,12 @@
 <section class="summary" aria-label="Classic run summary">
 	<div class="summary-hero">
 		<div>
-			<span class="rank-pill">{rank}</span>
+			<div class="rank-row">
+				<span class="rank-pill">{rank}</span>
+				{#if nextRankHint}
+					<span class="rank-next">{nextRankHint}</span>
+				{/if}
+			</div>
 			<h2 class="summary-score tnum">
 				<span class="big">{totalScore.toLocaleString('en-US')}</span>
 				<span class="max">/ {maxScore.toLocaleString('en-US')} pts</span>
@@ -48,7 +84,12 @@
 			<button type="button" class="outline" onclick={copySummary}>
 				{copied ? 'Copied results' : 'Copy results'}
 			</button>
-			<button type="button" class="quiet" onclick={onSwitchDaily}>Try Daily frame</button>
+			<button type="button" class="quiet" onclick={onSwitchDaily}>
+				{dailyFinished ? 'View Daily result' : 'Try Daily frame'}
+			</button>
+			{#if onSwitchUnlimited}
+				<button type="button" class="quiet" onclick={onSwitchUnlimited}>Play Unlimited</button>
+			{/if}
 		</div>
 	</div>
 
@@ -81,7 +122,7 @@
 					class:hit={entry.result.totalPoints >= 800}
 					class:mid={entry.result.totalPoints >= 450 && entry.result.totalPoints < 800}
 				>
-					+{entry.result.totalPoints}
+					+{entry.result.totalPoints.toLocaleString('en-US')}
 				</div>
 			</div>
 		{/each}
@@ -104,6 +145,14 @@
 		flex-wrap: wrap;
 	}
 
+	.rank-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+		margin-bottom: 10px;
+	}
+
 	.rank-pill {
 		display: inline-block;
 		background: var(--blue-soft);
@@ -112,7 +161,11 @@
 		font-weight: 700;
 		padding: 4px 10px;
 		border-radius: var(--r-sm);
-		margin-bottom: 10px;
+	}
+
+	.rank-next {
+		font-size: 13px;
+		color: var(--text-3);
 	}
 
 	.summary-score {

@@ -3,25 +3,38 @@ import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { CURATED_GLOBAL_POOL } from '$lib/curated';
 import { dropdownDedupeKey, normalizeTitle } from '$lib/scoring';
+import type { AutocompleteEntry } from '$lib/types';
 import { getCachedAnisongDbTitles } from './anisongdb';
+
+export type { AutocompleteEntry };
 
 const OFFLINE_DB_URL =
 	'https://github.com/manami-project/anime-offline-database/releases/latest/download/anime-offline-database-minified.json';
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (offline DB updates weekly)
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const FAILURE_BACKOFF_MS = 10 * 60 * 1000; // 10 minutes
-const CACHE_FILE = join(process.cwd(), '.cache', 'anime-catalog.json');
+const CACHE_FILE = join(process.cwd(), '.cache', 'anime-catalog-v2.json');
 
 const ANILIST_URL_RE = /^https?:\/\/anilist\.co\/anime\/(\d+)/i;
-const LATIN_TITLE_RE = /^[\u0020-\u007E\u00A0-\u024F\u2018-\u201F\u00D7\u2606\u3010\u3011]+$/;
+const LATIN_TITLE_RE = /^[\u0020-\u007E\u00A0-\u024F\u2018-\u201F\u00D7\u2606\u3010\u3011√]+$/;
+
+// Filter out commercials, PVs, summaries, recaps, shorts, music videos, and foreign-language
+// non-English/non-Romaji synonyms so the dropdown stays crisp and duplicate-free.
+const JUNK_TITLE_RE =
+	/\b(cm|cms|pv|pvs|preview|recap|summary|digest|shorts?|mini anime|pilot|picture drama|manner movie|commercial|promo|specials?|episode \d+|music video)\b/i;
+
+const FOREIGN_SYNONYM_RE =
+	/(?:\b(?:der|die|das|und|mit|für|ein|eine|pel[ií]cula|teoria|caos|temporada|epis[oó]dio|storia|stagione|guerrieri|chasseur|chevalier|monde|l['’]attaque|l['’]attacco|les|des|aux|une|del|los|las|para|com|por|czy|jest|oraz|jak|wśród)\b|[äöüßçñãõ])/i;
 
 interface RawOfflineEntry {
 	sources?: string[];
 	title?: string;
 	type?: string;
+	episodes?: number;
 	status?: string;
 	animeSeason?: { year?: number | null };
 	synonyms?: string[];
 	relatedAnime?: string[];
+	tags?: string[];
 }
 
 export interface CatalogMatch {
@@ -30,13 +43,13 @@ export interface CatalogMatch {
 	relatedIds: number[];
 }
 
-// Compact disk-serialized tuple: [anilistId, year, relatedIds, normalizedAliases]
+// Compact disk-serialized lookup tuple: [anilistId, year, relatedIds, normalizedAliases]
 type CompactCatalogRow = [number, number | null, number[], string[]];
 
 interface PersistedCatalog {
-	v: 1;
+	v: 2;
 	fetchedAt: number;
-	dropdownTitles: string[];
+	entries: AutocompleteEntry[];
 	rows: CompactCatalogRow[];
 }
 
@@ -69,9 +82,9 @@ function readDiskCatalog(): PersistedCatalog | null {
 		if (!existsSync(CACHE_FILE)) return null;
 		const parsed = JSON.parse(readFileSync(CACHE_FILE, 'utf8')) as PersistedCatalog;
 		if (
-			parsed?.v === 1 &&
-			Array.isArray(parsed.dropdownTitles) &&
-			parsed.dropdownTitles.length > 0 &&
+			parsed?.v === 2 &&
+			Array.isArray(parsed.entries) &&
+			parsed.entries.length > 0 &&
 			Array.isArray(parsed.rows) &&
 			typeof parsed.fetchedAt === 'number'
 		) {
@@ -102,9 +115,27 @@ async function writeDiskCatalog(entry: PersistedCatalog): Promise<void> {
 	}
 }
 
+function isCleanEnglishAlias(syn: string, primaryNorm: string): boolean {
+	if (syn.length < 4 || syn.length > 85) return false;
+	if (!LATIN_TITLE_RE.test(syn)) return false;
+	// Reject all-lowercase junk (e.g. "violet") or short acronyms ("AoT", "SAO")
+	if (syn === syn.toLowerCase() && /[a-z]/.test(syn)) return false;
+	if (/^[A-Z0-9]{2,5}$/.test(syn)) return false;
+	if (JUNK_TITLE_RE.test(syn)) return false;
+	if (FOREIGN_SYNONYM_RE.test(syn)) return false;
+	const norm = normalizeTitle(syn);
+	if (!norm || norm === primaryNorm) return false;
+	return true;
+}
+
 function distillOfflineDatabase(rawEntries: RawOfflineEntry[]): PersistedCatalog {
-	const dropdownByKey = new Map<string, string>();
+	const entryByAnilistId = new Map<number, AutocompleteEntry>();
+	const seenDropdownKeys = new Set<string>();
 	const rows: CompactCatalogRow[] = [];
+
+	// Seed curated global pool canonical romaji + English titles first so major shows always
+	// have clean canonical titles and accurate episode counts
+	const curatedById = new Map(CURATED_GLOBAL_POOL.map((item) => [item.id, item]));
 
 	for (const entry of rawEntries) {
 		if (!entry || entry.status === 'UPCOMING') continue;
@@ -130,62 +161,120 @@ function distillOfflineDatabase(rawEntries: RawOfflineEntry[]): PersistedCatalog
 			if (relId && relId !== alId) relatedSet.add(relId);
 		}
 
+		const curated = curatedById.get(alId);
+		const primary = (curated?.titleRomaji || entry.title || '').trim();
+		const normPrimary = normalizeTitle(primary);
+
 		const normAliases = new Set<string>();
-		const primary = entry.title?.trim() ?? '';
-		const isPlayableType =
-			entry.type === 'TV' ||
-			entry.type === 'MOVIE' ||
-			entry.type === 'OVA' ||
-			entry.type === 'ONA' ||
-			entry.type === 'SPECIAL';
-
-		if (primary) {
-			const normPrimary = normalizeTitle(primary);
-			if (normPrimary) normAliases.add(normPrimary);
-			if (isPlayableType) {
-				const dk = dropdownDedupeKey(primary);
-				if (dk && !dropdownByKey.has(dk)) dropdownByKey.set(dk, primary);
-			}
+		if (normPrimary) normAliases.add(normPrimary);
+		if (curated?.titleEnglish) {
+			const n = normalizeTitle(curated.titleEnglish);
+			if (n) normAliases.add(n);
 		}
-
-		let addedDropdownSynonyms = 0;
 		for (const rawSyn of entry.synonyms ?? []) {
 			const syn = rawSyn?.trim();
 			if (!syn || syn.length < 2 || syn.length > 90) continue;
-			const normSyn = normalizeTitle(syn);
-			if (!normSyn) continue;
-			normAliases.add(normSyn);
-
-			// Add clean Latin/English synonyms (e.g. "Attack on Titan", "Demon Slayer: Kimetsu no Yaiba")
-			// to the global dropdown so English search works equally for every player without pool leakage.
-			if (
-				isPlayableType &&
-				addedDropdownSynonyms < 2 &&
-				syn.length >= 4 &&
-				LATIN_TITLE_RE.test(syn) &&
-				!/^[A-Z0-9]{2,5}$/.test(syn)
-			) {
-				const dk = dropdownDedupeKey(syn);
-				if (dk && !dropdownByKey.has(dk)) {
-					dropdownByKey.set(dk, syn);
-					addedDropdownSynonyms++;
-				}
-			}
+			const n = normalizeTitle(syn);
+			if (n) normAliases.add(n);
 		}
 
 		if (normAliases.size > 0) {
 			rows.push([alId, year, Array.from(relatedSet).slice(0, 12), Array.from(normAliases)]);
 		}
+
+		// Decide whether this AniList entry belongs in the playable dropdown (one row per show!)
+		const tags = new Set((entry.tags ?? []).map((t) => t.toLowerCase()));
+		const isMusicOrAd =
+			tags.has('advertisement') ||
+			tags.has('commercial') ||
+			(tags.has('music') && entry.type !== 'TV' && entry.type !== 'MOVIE');
+		const isDropdownType =
+			entry.type === 'TV' ||
+			entry.type === 'MOVIE' ||
+			entry.type === 'ONA' ||
+			(entry.type === 'OVA' && (entry.episodes ?? 0) >= 2);
+
+		if (
+			!curated &&
+			(!isDropdownType ||
+				isMusicOrAd ||
+				!primary ||
+				JUNK_TITLE_RE.test(primary) ||
+				(primary === primary.toLowerCase() && /[a-z]/.test(primary)))
+		) {
+			continue;
+		}
+
+		if (!primary || entryByAnilistId.has(alId)) continue;
+		const dk = dropdownDedupeKey(primary);
+		if (!dk || seenDropdownKeys.has(dk)) continue;
+		seenDropdownKeys.add(dk);
+
+		// Pick at most ONE clean English/alternate display alias per show
+		let altTitle: string | undefined;
+		if (
+			curated?.titleEnglish &&
+			normalizeTitle(curated.titleEnglish) !== normPrimary
+		) {
+			altTitle = curated.titleEnglish;
+		} else {
+			for (const rawSyn of entry.synonyms ?? []) {
+				const syn = rawSyn?.trim();
+				if (syn && isCleanEnglishAlias(syn, normPrimary)) {
+					altTitle = syn;
+					break;
+				}
+			}
+		}
+
+		// Collect up to 3 clean search-only aliases (nicknames like "danmachi", "konosuba", "fma")
+		const extraSearchAliases = new Set<string>();
+		for (const rawSyn of [...(curated?.synonyms ?? []), ...(entry.synonyms ?? [])]) {
+			const syn = rawSyn?.trim();
+			if (!syn || syn.length < 3 || syn.length > 60) continue;
+			if (!LATIN_TITLE_RE.test(syn) || FOREIGN_SYNONYM_RE.test(syn) || JUNK_TITLE_RE.test(syn)) {
+				continue;
+			}
+			const n = normalizeTitle(syn);
+			if (n && n !== normPrimary && n !== (altTitle ? normalizeTitle(altTitle) : '')) {
+				extraSearchAliases.add(syn);
+				if (extraSearchAliases.size >= 3) break;
+			}
+		}
+
+		const epCount = curated?.episodes ?? (typeof entry.episodes === 'number' && entry.episodes > 0 ? entry.episodes : undefined);
+
+		entryByAnilistId.set(alId, {
+			t: primary,
+			...(altTitle ? { a: altTitle } : {}),
+			...(epCount ? { ep: epCount } : {}),
+			...(extraSearchAliases.size > 0 ? { s: Array.from(extraSearchAliases) } : {})
+		});
 	}
 
-	const dropdownTitles = Array.from(dropdownByKey.values()).sort((a, b) =>
-		a.localeCompare(b, 'en', { sensitivity: 'base' })
+	// Ensure every curated show exists even if offline DB omitted it
+	for (const item of CURATED_GLOBAL_POOL) {
+		if (entryByAnilistId.has(item.id)) continue;
+		const normPrimary = normalizeTitle(item.titleRomaji);
+		const alt =
+			item.titleEnglish && normalizeTitle(item.titleEnglish) !== normPrimary
+				? item.titleEnglish
+				: undefined;
+		entryByAnilistId.set(item.id, {
+			t: item.titleRomaji,
+			...(alt ? { a: alt } : {}),
+			...(item.episodes ? { ep: item.episodes } : {})
+		});
+	}
+
+	const entries = Array.from(entryByAnilistId.values()).sort((a, b) =>
+		a.t.localeCompare(b.t, 'en', { sensitivity: 'base' })
 	);
 
 	return {
-		v: 1,
+		v: 2,
 		fetchedAt: Date.now(),
-		dropdownTitles,
+		entries,
 		rows
 	};
 }
@@ -243,16 +332,19 @@ function triggerBackgroundRefresh(): void {
 }
 
 /**
- * Returns the unified global autocomplete title list (anime-offline-database Romaji + English
- * merged with AnisongDB). Identical for every player — never includes user-list-only titles.
+ * Returns one deduplicated autocomplete entry per anime (canonical title + optional English alias
+ * + episode count + clean nicknames). Strictly global — never leaks user list membership.
  */
-export async function getGlobalAutocompleteTitles(): Promise<{ titles: string[]; cachedAt: number }> {
+export async function getGlobalAutocompleteCatalog(): Promise<{
+	entries: AutocompleteEntry[];
+	titles: string[];
+	cachedAt: number;
+}> {
 	hydrateMemoryIfNeeded();
 	const now = Date.now();
 
 	if (!catalog) {
 		triggerBackgroundRefresh();
-		// On cold boot, wait up to 8s for offline DB so the first request gets full English + Romaji
 		if (inflight) {
 			await Promise.race([inflight, new Promise((r) => setTimeout(r, 8_000))]);
 		}
@@ -260,40 +352,49 @@ export async function getGlobalAutocompleteTitles(): Promise<{ titles: string[];
 		triggerBackgroundRefresh();
 	}
 
+	if (catalog && catalog.entries.length > 0) {
+		return {
+			entries: catalog.entries,
+			titles: catalog.entries.map((e) => e.t),
+			cachedAt: catalog.fetchedAt
+		};
+	}
+
+	// Cold fallback to AnisongDB + curated pool if GitHub Releases is temporarily unreachable
 	const anisong = await getCachedAnisongDbTitles();
+	const byKey = new Map<string, AutocompleteEntry>();
 
-	const byKey = new Map<string, string>();
-	if (catalog) {
-		for (const t of catalog.dropdownTitles) {
-			const k = dropdownDedupeKey(t);
-			if (k && !byKey.has(k)) byKey.set(k, t);
-		}
-	}
-	for (const t of anisong.titles) {
-		const k = dropdownDedupeKey(t);
-		if (k && !byKey.has(k)) byKey.set(k, t);
-	}
-	// Always ensure curated global pool titles are included globally for all players
 	for (const item of CURATED_GLOBAL_POOL) {
-		for (const t of [item.titleRomaji, item.titleEnglish]) {
-			if (!t) continue;
-			const k = dropdownDedupeKey(t);
-			if (k && !byKey.has(k)) byKey.set(k, t);
-		}
+		const k = dropdownDedupeKey(item.titleRomaji);
+		if (!k || byKey.has(k)) continue;
+		const alt =
+			item.titleEnglish && normalizeTitle(item.titleEnglish) !== normalizeTitle(item.titleRomaji)
+				? item.titleEnglish
+				: undefined;
+		byKey.set(k, {
+			t: item.titleRomaji,
+			...(alt ? { a: alt } : {}),
+			...(item.episodes ? { ep: item.episodes } : {})
+		});
 	}
 
-	const titles = Array.from(byKey.values()).sort((a, b) =>
-		a.localeCompare(b, 'en', { sensitivity: 'base' })
+	for (const raw of anisong.titles) {
+		if (JUNK_TITLE_RE.test(raw)) continue;
+		const k = dropdownDedupeKey(raw);
+		if (k && !byKey.has(k)) byKey.set(k, { t: raw });
+	}
+
+	const entries = Array.from(byKey.values()).sort((a, b) =>
+		a.t.localeCompare(b.t, 'en', { sensitivity: 'base' })
 	);
 
-	const cachedAt = catalog ? catalog.fetchedAt : anisong.cachedAt;
-	return { titles, cachedAt };
+	return {
+		entries,
+		titles: entries.map((e) => e.t),
+		cachedAt: anisong.cachedAt
+	};
 }
 
-/**
- * Instant, zero-quota lookup of an anime's AniList ID, release year, and related franchise IDs
- * from the in-memory anime-offline-database index.
- */
 export function lookupCatalogByTitle(rawTitle: string): CatalogMatch | null {
 	hydrateMemoryIfNeeded();
 	if (!catalog && !inflight) {
@@ -307,5 +408,5 @@ export function lookupCatalogByTitle(rawTitle: string): CatalogMatch | null {
 
 export function getCatalogTitleCount(): number {
 	hydrateMemoryIfNeeded();
-	return catalog?.dropdownTitles.length ?? 0;
+	return catalog?.entries.length ?? 0;
 }

@@ -52,16 +52,21 @@
 		)
 	);
 
-	const animeWhy = $derived(
-		result.skipped
-			? 'Skipped'
-			: result.guessedTitle
-				? `You said ${result.guessedTitle}`
-				: 'No guess'
-	);
+	const animeWhy = $derived.by(() => {
+		if (result.skipped) return 'Skipped';
+		if (result.animeMatch === 'franchise') {
+			return result.guessedTitle
+				? `Right series, wrong season (${result.guessedTitle})`
+				: 'Right series, wrong season';
+		}
+		return result.guessedTitle ? `You said ${result.guessedTitle}` : 'No guess';
+	});
 
 	const episodeWhy = $derived.by(() => {
 		if (result.skipped) return 'Skipped';
+		if (result.animeMatch === 'franchise') {
+			return `Wrong season — episode not scored (EP ${result.reveal.episodeNumber})`;
+		}
 		if (result.animeMatch !== 'exact' || result.guessedEpisode === null) {
 			return `It was episode ${result.reveal.episodeNumber}`;
 		}
@@ -574,6 +579,30 @@
 	.after {
 		color: var(--text-2);
 		font-size: 14px;
+	}
+
+	@media (max-width: 960px) {
+		.result-top {
+			order: 1;
+		}
+		.score {
+			order: 2;
+		}
+		.breakdown {
+			order: 3;
+		}
+		.tl-wrap {
+			order: 4;
+		}
+		.actions {
+			order: 5;
+		}
+		.synopsis {
+			order: 6;
+		}
+		.ext {
+			order: 7;
+		}
 	}
 
 	@media (max-width: 600px) {

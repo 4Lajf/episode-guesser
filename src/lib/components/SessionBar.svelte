@@ -14,6 +14,7 @@
 		dailyPuzzleNumber?: number;
 		dailyScopeLabel?: string;
 		dailyAttemptsCount: number;
+		dailyAnimeHitAttempt?: number | null;
 		dailyGaveUp?: boolean;
 		dailyWon: boolean;
 		dailyFinished: boolean;
@@ -34,6 +35,7 @@
 		dailyPuzzleNumber,
 		dailyScopeLabel,
 		dailyAttemptsCount,
+		dailyAnimeHitAttempt = null,
 		dailyGaveUp = false,
 		dailyWon,
 		dailyFinished,
@@ -57,8 +59,8 @@
 						{#if done}
 							{@const pts = done.result.totalPoints}
 							<li class="done" class:good={pts >= 800} class:zero={pts === 0}>
-								<span class="sr-only">Round {idx + 1} scored {pts} points</span>
-								<span class="v tnum" aria-hidden="true">{pts === 0 ? '✗' : pts}</span>
+								<span class="sr-only">Round {idx + 1} scored {pts.toLocaleString('en-US')} points</span>
+								<span class="v tnum" aria-hidden="true">{pts === 0 ? '✗' : pts.toLocaleString('en-US')}</span>
 							</li>
 						{:else if idx === classicRoundIndex}
 							<li class="now" aria-current="step">
@@ -103,7 +105,7 @@
 					<dd class="tnum">{streak}</dd>
 				</div>
 				<div>
-					<dt>Best</dt>
+					<dt>Best streak</dt>
 					<dd class="tnum">{bestStreak}</dd>
 				</div>
 			</dl>
@@ -129,6 +131,8 @@
 							Solved in <b class="tnum">{dailyAttemptsCount}</b> of {WORDLE_MAX_ATTEMPTS}
 						{:else if dailyGaveUp}
 							Gave up
+						{:else if dailyAnimeHitAttempt}
+							Anime in <b class="tnum">{dailyAnimeHitAttempt}</b>, episode missed
 						{:else}
 							Missed ({WORDLE_MAX_ATTEMPTS}/{WORDLE_MAX_ATTEMPTS})
 						{/if}

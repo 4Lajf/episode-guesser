@@ -9,6 +9,7 @@
 		initialUsername: string;
 		initialStatuses: ListStatus[];
 		initialIncludeSingleEp: boolean;
+		isGlobalPool?: boolean;
 		recentUsers: string[];
 		loading: boolean;
 		error: string | null;
@@ -24,6 +25,7 @@
 		initialUsername,
 		initialStatuses,
 		initialIncludeSingleEp,
+		isGlobalPool = false,
 		recentUsers,
 		loading,
 		error,
@@ -213,8 +215,16 @@
 				<span>or play right away</span>
 			</div>
 
-			<button type="button" class="btn-global" disabled={loading} onclick={onUseGlobal}>
-				Play with curated Global Pool ({CURATED_POOL_SIZE} popular anime)
+			<button
+				type="button"
+				class="btn-global"
+				class:active={isGlobalPool}
+				disabled={loading || isGlobalPool}
+				onclick={onUseGlobal}
+			>
+				{isGlobalPool
+					? `Currently playing Global Pool (${CURATED_POOL_SIZE} popular anime)`
+					: `Play with curated Global Pool (${CURATED_POOL_SIZE} popular anime)`}
 			</button>
 		</div>
 	</div>
@@ -475,5 +485,16 @@
 	.btn-global:hover:not(:disabled) {
 		border-color: var(--paper);
 		background: var(--ink-raised);
+	}
+
+	.btn-global:disabled {
+		opacity: 0.72;
+		cursor: default;
+	}
+
+	.btn-global.active {
+		border-color: var(--line);
+		background: var(--ink-deep);
+		color: var(--text-2);
 	}
 </style>

@@ -56,7 +56,7 @@
 				onclick={onClose}
 				aria-label="Close full-size image"
 			>
-				Close (Esc)
+				Close <span class="esc-hint">(Esc)</span>
 			</button>
 			<img src={imageUrl} alt="Full-resolution anime episode screencap" class="lightbox-img" />
 		</div>
@@ -118,5 +118,11 @@
 		border-radius: var(--r);
 		border: 1px solid var(--line);
 		background: var(--stage-black);
+	}
+
+	@media (max-width: 640px), (hover: none) {
+		.esc-hint {
+			display: none;
+		}
 	}
 </style>

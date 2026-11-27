@@ -43,7 +43,7 @@
 	);
 
 	const canInspect = $derived(
-		allowInspect && Boolean(imageUrl) && !loading && !imgFailed && Boolean(onInspect)
+		allowInspect && Boolean(imageUrl) && imgLoaded && !loading && !imgFailed && Boolean(onInspect)
 	);
 
 	function retryImage() {
@@ -287,6 +287,12 @@
 
 		.pegs .slot {
 			width: 22px;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.inspect {
+			display: none;
 		}
 	}
 </style>

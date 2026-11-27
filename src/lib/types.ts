@@ -2,6 +2,17 @@ export type GameMode = 'classic' | 'unlimited' | 'daily';
 
 export type ListStatus = 'COMPLETED' | 'CURRENT' | 'PAUSED' | 'DROPPED' | 'REPEATING';
 
+export interface AutocompleteEntry {
+	/** Canonical display title */
+	t: string;
+	/** Optional clean alternate (e.g. English) title for search & subtle disambiguation */
+	a?: string;
+	/** Known episode count from global catalog (reflects selected title only) */
+	ep?: number;
+	/** Extra normalized search aliases (e.g. nicknames like "danmachi") */
+	s?: string[];
+}
+
 export interface AnimePoolItem {
 	id: number;
 	episodes: number | null;

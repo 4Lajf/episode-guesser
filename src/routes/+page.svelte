@@ -18,6 +18,7 @@
 		WORDLE_ZOOM_STEPS
 	} from '$lib/scoring';
 	import type {
+		AutocompleteEntry,
 		ClassicGuessResponse,
 		CompletedClassicRound,
 		EpisodeReveal,
@@ -45,7 +46,7 @@
 	const STORAGE_DAILY_SCOPE_KEY = 'eg:daily-global:v1';
 	const STORAGE_DAILY_DONE_KEY = 'eg:daily-done:v1';
 
-	let anisongDbTitles = $state<string[]>([]);
+	let autocompleteEntries = $state<AutocompleteEntry[]>([]);
 
 	let profile = $state<PublicProfile>({
 		username: 'Global Pool',
@@ -102,6 +103,7 @@
 	let unlimitedStreak = $state(0);
 	let bestStreak = $state(0);
 	let unlimitedSeenIds = $state<number[]>([]);
+	let recentMediaIds = $state<number[]>([]);
 
 	let dailyRound = $state<RoundPayload | null>(null);
 	let dailyUseGlobal = $state(false);
@@ -123,9 +125,9 @@
 
 	const activeStreak = $derived(mode === 'classic' ? classicStreak : unlimitedStreak);
 
-	// Strictly global autocomplete catalog (Romaji + English from anime-offline-database + AnisongDB)
+	// Strictly global autocomplete catalog (deduplicated per AniList ID from anime-offline-database + AnisongDB)
 	// so the dropdown NEVER reveals whether any anime is on the active user's list or Global Pool.
-	const dropdownTitles = $derived(anisongDbTitles);
+	const dropdownEntries = $derived(autocompleteEntries);
 
 	const dailyScopeHintKey = $derived.by(() => {
 		const today = getTodayUtcDate();
@@ -185,6 +187,10 @@
 		return dailyAttempts.find((a) => a.animeStatus === 'hit') ?? null;
 	});
 
+	const dailyAnimeHitAttempt = $derived(
+		dailyAttempts.find((a) => a.animeStatus === 'hit')?.attemptNumber ?? null
+	);
+
 	const dailyEpisodeBounds = $derived.by(() => {
 		let minEp = 1;
 		let maxEp: number | null = null;
@@ -204,13 +210,16 @@
 			minEp = 1;
 			maxEp = null;
 		}
-		const suggested = maxEp !== null ? Math.round((minEp + maxEp) / 2) : Math.max(1, minEp);
+		// Never spoil the last remaining episode or silently jump the episode input before the show is matched.
+		const lastTriedEp = dailyAttempts.at(-1)?.guessedEpisode;
+		const initialEp = lastTriedEp && lastTriedEp > 0 ? lastTriedEp : 1;
+
 		let hint = '';
 		if (dailyMatchedAttempt) {
 			if (minEp > 1 && maxEp !== null) {
 				hint =
 					minEp === maxEp
-						? `It must be episode ${minEp}.`
+						? 'You narrowed it down to one episode — check your arrows above.'
 						: `The episode is between ${minEp} and ${maxEp}.`;
 			} else if (maxEp !== null) {
 				hint = `The episode is earlier than ${maxEp + 1}.`;
@@ -220,7 +229,7 @@
 				hint = 'Narrow down the episode number.';
 			}
 		}
-		return { minEp, maxEp, suggested, hint };
+		return { minEp, maxEp, initialEp, hint };
 	});
 
 	const activeImageUrl = $derived(activeReveal?.reveal.imageUrl ?? currentRound?.imageUrl ?? null);
@@ -228,6 +237,7 @@
 	const celNote = $derived.by(() => {
 		if (mode === 'daily') {
 			if (dailyFinished) return 'Full 1.0× frame unlocked';
+			if (dailyZoomScale <= 1.01) return 'Full 1.0× frame — final attempt';
 			return `Zoom ${dailyZoomScale.toFixed(1)}×, wider after every miss`;
 		}
 		if (activeReveal) {
@@ -288,13 +298,22 @@
 		try {
 			const res = await fetch('/api/autocomplete');
 			if (!res.ok) return;
-			const data = (await res.json()) as { titles?: string[] };
-			if (Array.isArray(data.titles)) {
-				anisongDbTitles = data.titles;
+			const data = (await res.json()) as {
+				entries?: AutocompleteEntry[];
+				titles?: string[];
+			};
+			if (Array.isArray(data.entries) && data.entries.length > 0) {
+				autocompleteEntries = data.entries;
+			} else if (Array.isArray(data.titles)) {
+				autocompleteEntries = data.titles.map((t) => ({ t }));
 			}
 		} catch {
-			// fallback handled by profile titles
+			// keep empty until retry
 		}
+	}
+
+	function recordRecentMedia(id: number) {
+		recentMediaIds = [...recentMediaIds.filter((x) => x !== id), id].slice(-24);
 	}
 
 	function clearAllModeRuns() {
@@ -313,6 +332,7 @@
 		unlimitedScore = 0;
 		unlimitedStreak = 0;
 		unlimitedSeenIds = [];
+		recentMediaIds = [];
 
 		dailyRound = null;
 		dailyAttempts = [];
@@ -428,9 +448,9 @@
 				profile.isGlobalPool || (targetMode === 'daily' && dailyUseGlobal);
 			const excludeMediaIds =
 				targetMode === 'classic'
-					? classicSeenIds
+					? Array.from(new Set([...classicSeenIds, ...recentMediaIds]))
 					: targetMode === 'unlimited'
-						? unlimitedSeenIds
+						? Array.from(new Set([...unlimitedSeenIds, ...recentMediaIds]))
 						: [];
 
 			const res = await fetch('/api/round', {
@@ -641,6 +661,7 @@
 				if (reqMode === 'classic') {
 					classicReveal = classicRes;
 					classicSeenIds = [...classicSeenIds, classicRes.reveal.anilistId];
+					recordRecentMedia(classicRes.reveal.anilistId);
 					classicScore += classicRes.totalPoints;
 					classicStreak = classicRes.animeMatch === 'exact' ? classicStreak + 1 : 0;
 					classicHistory = [
@@ -650,6 +671,7 @@
 				} else {
 					unlimitedReveal = classicRes;
 					unlimitedSeenIds = [...unlimitedSeenIds, classicRes.reveal.anilistId];
+					recordRecentMedia(classicRes.reveal.anilistId);
 					unlimitedScore += classicRes.totalPoints;
 					if (classicRes.animeMatch === 'exact') {
 						unlimitedStreak++;
@@ -803,8 +825,8 @@
 	{:else if profile.isGlobalPool && !profileLoading && !nudgeDismissed}
 		<div class="shell nudge-wrap">
 			<div class="anilist-nudge">
-				<span>
-					Playing curated Global Pool ({profile.eligibleShows} iconic anime). Connect your AniList to guess frames from your own watched shows.
+				<span class="nudge-copy">
+					Playing Global Pool ({profile.eligibleShows} popular anime). Connect your AniList to play your own list.
 				</span>
 				<div class="nudge-actions">
 					<button type="button" class="nudge-btn" onclick={() => (setupOpen = true)}>
@@ -835,6 +857,7 @@
 		dailyPuzzleNumber={currentRound?.dailyMeta?.puzzleNumber}
 		dailyScopeLabel={currentRound?.dailyMeta?.scopeLabel}
 		dailyAttemptsCount={dailyAttempts.length}
+		{dailyAnimeHitAttempt}
 		dailyGaveUp={dailyAttempts.some((a) => a.gaveUp)}
 		{dailyWon}
 		{dailyFinished}
@@ -881,8 +904,10 @@
 				<ClassicSummary
 					username={profile.username}
 					rounds={classicHistory}
+					{dailyFinished}
 					onPlayAgain={restartClassicRun}
 					onSwitchDaily={() => switchMode('daily')}
+					onSwitchUnlimited={() => switchMode('unlimited')}
 				/>
 			</div>
 		{:else}
@@ -923,6 +948,8 @@
 									lockedYear={dailyMatchedAttempt?.guessedYear ?? null}
 									liveEpisode={dailyLiveEpisode}
 									hintText={dailyEpisodeBounds.hint}
+									onSwitchClassic={() => switchMode('classic')}
+									onSwitchUnlimited={() => switchMode('unlimited')}
 								/>
 							</div>
 						{/if}
@@ -930,16 +957,17 @@
 						{#if !dailyFinished}
 							<div class="daily-input-slot">
 								<GuessConsole
-									titles={dropdownTitles}
+									entries={dropdownEntries}
 									{submitting}
 									disabled={profileLoading || roundLoading || !currentRound}
 									submitLabel="Lock in guess"
 									skipLabel="Give up"
 									confirmSkip={true}
+									confirmSkipLabel="Confirm give up?"
 									lockedAnimeTitle={dailyMatchedAttempt?.guessedTitle ?? ''}
-									minEpisode={dailyMatchedAttempt ? dailyEpisodeBounds.minEp : 1}
-									maxEpisode={dailyMatchedAttempt ? dailyEpisodeBounds.maxEp : null}
-									initialEpisode={dailyEpisodeBounds.suggested}
+									minEpisode={1}
+									maxEpisode={null}
+									initialEpisode={dailyEpisodeBounds.initialEp}
 									inlineError={guessInlineError}
 									roundKey={`daily-${roundCounter}-${dailyAttempts.length}`}
 									onEpisodeChange={(ep) => (dailyLiveEpisode = ep)}
@@ -963,11 +991,13 @@
 						/>
 					{:else}
 						<GuessConsole
-							titles={dropdownTitles}
+							entries={dropdownEntries}
 							{submitting}
 							disabled={profileLoading || roundLoading || !currentRound}
 							submitLabel="Lock in guess"
 							skipLabel="Skip frame"
+							confirmSkip={mode === 'unlimited' && unlimitedStreak >= 2}
+							confirmSkipLabel="Skip & end streak?"
 							scoringNote="500 points for the right anime, up to 500 more the closer your episode is."
 							inlineError={guessInlineError}
 							roundKey={`${mode}-${roundCounter}`}
@@ -993,6 +1023,7 @@
 	initialUsername={profile.isGlobalPool ? '' : profile.username}
 	initialStatuses={profile.statuses}
 	initialIncludeSingleEp={profile.includeSingleEp}
+	isGlobalPool={profile.isGlobalPool}
 	{recentUsers}
 	loading={setupLoading}
 	error={setupError}
@@ -1010,20 +1041,21 @@
 	}
 
 	.nudge-wrap {
-		padding-top: 10px;
+		padding-top: 6px;
 	}
 
 	.anilist-nudge {
+		position: relative;
 		background: var(--ink-deep);
 		border: 1px solid var(--line);
 		border-left: 3px solid var(--blue);
 		border-radius: var(--r);
-		padding: 9px 14px;
+		padding: 6px 10px 6px 12px;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 12px;
-		font-size: 13.5px;
+		gap: 10px;
+		font-size: 13px;
 		color: var(--text-2);
 	}
 
@@ -1038,7 +1070,7 @@
 	.nudge-actions {
 		display: inline-flex;
 		align-items: center;
-		gap: 8px;
+		gap: 6px;
 		flex: none;
 	}
 
@@ -1047,8 +1079,8 @@
 		color: var(--ink-deep);
 		border: 0;
 		border-radius: 6px;
-		padding: 7px 14px;
-		font-size: 13.5px;
+		padding: 5px 12px;
+		font-size: 13px;
 		font-weight: 700;
 		white-space: nowrap;
 		transition: background-color 120ms ease;
@@ -1062,9 +1094,13 @@
 		background: none;
 		border: 0;
 		color: var(--text-3);
-		padding: 6px 8px;
+		min-width: 30px;
+		height: 30px;
+		padding: 0 6px;
+		display: inline-grid;
+		place-items: center;
 		border-radius: 6px;
-		font-size: 14px;
+		font-size: 15px;
 		line-height: 1;
 		transition: background-color 120ms ease, color 120ms ease;
 	}
@@ -1134,6 +1170,15 @@
 		.anilist-nudge {
 			flex-direction: column;
 			align-items: flex-start;
+			padding: 8px 40px 8px 12px;
+		}
+
+		.anilist-nudge:not(.warn) .nudge-dismiss {
+			position: absolute;
+			top: 4px;
+			right: 4px;
+			width: 36px;
+			height: 36px;
 		}
 	}
 </style>

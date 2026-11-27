@@ -18,6 +18,8 @@
 		lockedYear?: number | null;
 		liveEpisode?: number;
 		hintText?: string;
+		onSwitchClassic?: () => void;
+		onSwitchUnlimited?: () => void;
 	}
 
 	let {
@@ -31,7 +33,9 @@
 		lockedAnimeTitle = '',
 		lockedYear = null,
 		liveEpisode = 1,
-		hintText = ''
+		hintText = '',
+		onSwitchClassic,
+		onSwitchUnlimited
 	}: Props = $props();
 
 	let copiedText = $state(false);
@@ -109,12 +113,18 @@
 		return `${WORDLE_ZOOM_STEPS[idx].toFixed(1)}× zoom`;
 	});
 
+	const animeHitAttempt = $derived(
+		attempts.find((a) => a.animeStatus === 'hit')?.attemptNumber ?? null
+	);
+
 	const shareSummaryLine = $derived(
 		won
 			? `Solved in ${attempts.length} of ${WORDLE_MAX_ATTEMPTS}`
 			: attempts.some((a) => a.gaveUp)
 				? 'Gave up'
-				: `Missed (${WORDLE_MAX_ATTEMPTS}/${WORDLE_MAX_ATTEMPTS})`
+				: animeHitAttempt
+					? `Anime in ${animeHitAttempt}, ep missed`
+					: `Missed (${WORDLE_MAX_ATTEMPTS}/${WORDLE_MAX_ATTEMPTS})`
 	);
 
 	const showEnglish = $derived(
@@ -124,6 +134,34 @@
 		)
 	);
 
+	async function writeTextToClipboard(text: string): Promise<boolean> {
+		if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+			try {
+				await navigator.clipboard.writeText(text);
+				return true;
+			} catch {
+				// fall through to textarea copy fallback
+			}
+		}
+		if (typeof document !== 'undefined') {
+			try {
+				const ta = document.createElement('textarea');
+				ta.value = text;
+				ta.setAttribute('readonly', '');
+				ta.style.position = 'fixed';
+				ta.style.opacity = '0';
+				document.body.appendChild(ta);
+				ta.select();
+				const ok = document.execCommand('copy');
+				document.body.removeChild(ta);
+				return ok;
+			} catch {
+				return false;
+			}
+		}
+		return false;
+	}
+
 	async function copyShareText() {
 		const text = buildWordleShareText({
 			puzzleNumber,
@@ -131,12 +169,10 @@
 			attempts,
 			won
 		});
-		try {
-			await navigator.clipboard.writeText(text);
+		const ok = await writeTextToClipboard(text);
+		if (ok) {
 			copiedText = true;
 			setTimeout(() => (copiedText = false), 2200);
-		} catch {
-			// ignore
 		}
 	}
 
@@ -485,7 +521,7 @@
 					<p class="answer-sub">{reveal.titleEnglish}</p>
 				{/if}
 				<p class="answer-ep">
-					Episode {reveal.episodeNumber}{#if reveal.episodeTitle}, “{reveal.episodeTitle}”{/if}{#if reveal.seasonYear} · {reveal.seasonYear}{/if}
+					Episode {reveal.episodeNumber}{#if reveal.episodeTitle}, “{reveal.episodeTitle}”{/if}{#if reveal.seasonYear}{' · '}{reveal.seasonYear}{/if}
 				</p>
 				<a
 					class="ext"
@@ -667,6 +703,21 @@
 							{copiedText ? 'Copied text' : 'Copy as text'}
 						</button>
 					</div>
+
+					{#if onSwitchClassic || onSwitchUnlimited}
+						<div class="play-more">
+							{#if onSwitchClassic}
+								<button type="button" class="primary-next" onclick={onSwitchClassic}>
+									Play Classic
+								</button>
+							{/if}
+							{#if onSwitchUnlimited}
+								<button type="button" class="quiet" onclick={onSwitchUnlimited}>
+									Play Unlimited
+								</button>
+							{/if}
+						</div>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -941,6 +992,30 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
+	}
+
+	.play-more {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		padding-top: 8px;
+		border-top: 1px solid var(--line-soft);
+	}
+
+	.primary-next {
+		height: 44px;
+		padding: 0 20px;
+		border: 0;
+		border-radius: var(--r);
+		background: var(--paper);
+		color: var(--ink-deep);
+		font-size: 14.5px;
+		font-weight: 750;
+		transition: background-color 120ms ease;
+	}
+
+	.primary-next:hover {
+		background: var(--paper-hover);
 	}
 
 	.outline {

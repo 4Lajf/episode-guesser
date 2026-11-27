@@ -25,6 +25,7 @@ export function normalizeTitle(raw: string): string {
 		.normalize('NFKD')
 		.replace(/[\u0300-\u036f]/g, '')
 		.replace(/\s*\(\d{4}\)\s*$/g, '')
+		.replace(/√/g, ' root ')
 		.replace(/×/g, ' x ')
 		.replace(/[`'’‘"“”]/g, '')
 		.replace(/[‐‑‒–—―]/g, ' ')
@@ -120,7 +121,7 @@ export function scoreEpisodeProximity(
 	}
 
 	const total = Math.max(totalEpisodes, actualEpisode, 12);
-	const scale = Math.max(2.2, Math.min(24, total * 0.14));
+	const scale = Math.max(3.6, Math.min(26, total * 0.18));
 	const raw = Math.round(500 * Math.exp(-distance / scale));
 	const points = raw < 15 ? 0 : raw;
 
@@ -349,4 +350,21 @@ export function getClassicRank(totalScore: number, maxScore: number): string {
 	if (ratio >= 0.6) return 'Layout Artist';
 	if (ratio >= 0.4) return 'In-Betweener';
 	return 'Fresh Viewer';
+}
+
+export function getNextClassicRankHint(totalScore: number, maxScore: number): string {
+	if (maxScore <= 0) return '';
+	const tiers: Array<{ ratio: number; name: string }> = [
+		{ ratio: 0.4, name: 'In-Betweener' },
+		{ ratio: 0.6, name: 'Layout Artist' },
+		{ ratio: 0.78, name: 'Episode Director' },
+		{ ratio: 0.92, name: 'Key Animator' }
+	];
+	for (const tier of tiers) {
+		const threshold = Math.round(tier.ratio * maxScore);
+		if (totalScore < threshold) {
+			return `Next rank: ${tier.name} at ${threshold.toLocaleString('en-US')} pts`;
+		}
+	}
+	return 'Top rank achieved';
 }

@@ -51,6 +51,7 @@ describe('normalizeTitle & matchAnimeTitle', () => {
 			normalizeTitle('Maho Shojo Madoka Magica')
 		);
 		expect(normalizeTitle('Yuu☆Yuu☆Hakusho')).toBe(normalizeTitle('Yu Yu Hakusho'));
+		expect(normalizeTitle('Tokyo Ghoul √A')).toBe(normalizeTitle('Tokyo Ghoul Root A'));
 	});
 
 	it('matches exact aliases including HxH, Spy x Family, KonoSuba o/wo, and detects franchises', () => {
