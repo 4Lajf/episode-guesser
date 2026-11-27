@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST as guessPost } from '../src/routes/api/guess/+server';
 import { clearDailyStoreForTests, saveDailyRecord } from '../src/lib/server/dailyStore';
 import type { SealedDailyState, SealedRoundSecret } from '../src/lib/server/picker';
@@ -42,6 +42,10 @@ describe('POST /api/guess security & scoring invariants', () => {
 	beforeEach(() => {
 		clearDailyStoreForTests();
 		vi.restoreAllMocks();
+	});
+
+	afterEach(() => {
+		clearDailyStoreForTests();
 	});
 
 	it('rejects tampered roundToken and dailyStateToken payloads', async () => {

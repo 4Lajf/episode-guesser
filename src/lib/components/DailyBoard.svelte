@@ -70,6 +70,18 @@
 		return '';
 	}
 
+	function describeCell(
+		kind: 'Year' | 'Episode',
+		value: number | null,
+		status: TileStatus,
+		dir: 'up' | 'down' | 'exact' | null
+	): string {
+		const valText = value && value > 0 ? String(value) : 'unknown';
+		const statusText = status === 'hit' ? 'exact match' : status === 'close' ? 'close' : 'miss';
+		const dirText = dir === 'up' ? ', target is higher' : dir === 'down' ? ', target is lower' : '';
+		return `${kind} ${valText}: ${statusText}${dirText}`;
+	}
+
 	function svgFill(status: TileStatus): string {
 		if (status === 'hit') return '#5BCB95';
 		if (status === 'close') return '#F4C752';
@@ -149,23 +161,35 @@
 							<span class="anime-text">{attempt.guessedTitle}</span>
 						</div>
 
-						<div class="cell num-cell {attempt.yearStatus}">
+						<div
+							class="cell num-cell {attempt.yearStatus}"
+							aria-label={describeCell('Year', attempt.guessedYear, attempt.yearStatus, attempt.yearDirection)}
+						>
+							{#if attempt.yearStatus === 'close'}
+								<span class="close-tilde" aria-hidden="true">≈</span>
+							{/if}
 							<span class="font-display">
 								{attempt.guessedYear ?? '—'}
 							</span>
 							{#if attempt.yearDirection}
-								<span class="dir-mark" class:lamp={attempt.yearStatus !== 'hit'}>
+								<span class="dir-mark" class:lamp={attempt.yearStatus !== 'hit'} aria-hidden="true">
 									{arrowChar(attempt.yearDirection)}
 								</span>
 							{/if}
 						</div>
 
-						<div class="cell num-cell {attempt.episodeStatus}">
+						<div
+							class="cell num-cell {attempt.episodeStatus}"
+							aria-label={describeCell('Episode', attempt.guessedEpisode, attempt.episodeStatus, attempt.episodeDirection)}
+						>
+							{#if attempt.episodeStatus === 'close'}
+								<span class="close-tilde" aria-hidden="true">≈</span>
+							{/if}
 							<span class="font-display">
 								{attempt.guessedEpisode > 0 ? attempt.guessedEpisode : '—'}
 							</span>
 							{#if attempt.episodeDirection}
-								<span class="dir-mark" class:lamp={attempt.episodeStatus !== 'hit'}>
+								<span class="dir-mark" class:lamp={attempt.episodeStatus !== 'hit'} aria-hidden="true">
 									{arrowChar(attempt.episodeDirection)}
 								</span>
 							{/if}
@@ -193,7 +217,7 @@
 				<span class="result-badge font-display" class:won>
 					{#if won}
 						Solved in {attempts.length} of {WORDLE_MAX_ATTEMPTS}
-					{:else if attempts.some((a) => a.guessedEpisode === 0 && a.guessedTitle === 'Gave up')}
+					{:else if attempts.some((a) => a.gaveUp)}
 						Gave up
 					{:else}
 						Out of attempts
@@ -441,6 +465,12 @@
 		font-weight: 700;
 	}
 
+	.close-tilde {
+		font-size: 12px;
+		font-weight: 700;
+		opacity: 0.85;
+	}
+
 	.dir-mark.lamp {
 		color: var(--lamp);
 	}
@@ -493,14 +523,13 @@
 		text-decoration: underline;
 	}
 
+	/* Dissolved inner card: structural hairline divider instead of nested bordered card */
 	.share-card {
 		display: flex;
 		align-items: center;
 		gap: 14px;
-		background: var(--ink-2);
-		border: 1px solid var(--rule);
-		border-radius: var(--radius-md);
-		padding: 12px 14px;
+		border-left: 1px solid var(--rule);
+		padding-left: 18px;
 	}
 
 	.share-svg {
@@ -559,6 +588,13 @@
 
 		.daily-result {
 			grid-template-columns: 1fr;
+		}
+
+		.share-card {
+			border-left: 0;
+			padding-left: 0;
+			border-top: 1px solid var(--rule);
+			padding-top: 14px;
 		}
 	}
 </style>

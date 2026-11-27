@@ -37,18 +37,6 @@
 		titlesForDropdown: string[];
 	}
 
-	interface SavedDailyState {
-		date: string;
-		scopeKey: string;
-		roundToken: string;
-		dailyStateToken: string;
-		imageUrl: string;
-		attempts: WordleAttemptFeedback[];
-		finished: boolean;
-		won: boolean;
-		reveal: EpisodeReveal | null;
-	}
-
 	const STORAGE_USER_KEY = 'eg:anilist-config:v1';
 	const STORAGE_RECENT_KEY = 'eg:recent-users:v1';
 	const STORAGE_BEST_STREAK_KEY = 'eg:best-streak:v1';
@@ -139,43 +127,12 @@
 		return hit ? hit.guessedTitle : '';
 	});
 
-	const activeDailyScopeKey = $derived.by(() => {
-		if (profile.isGlobalPool || dailyUseGlobal) return 'global';
-		const statusKey = profile.statuses.slice().sort().join(',');
-		return `user:${profile.username.toLowerCase()}:${statusKey}:${profile.includeSingleEp ? '1' : '0'}`;
-	});
-
-	function dailyStorageKey(date: string, scopeKey: string): string {
-		return `eg:daily:v2:${date}:${scopeKey}`;
-	}
-
-	function clearSavedDaily(date: string, scopeKey: string) {
-		if (typeof localStorage === 'undefined') return;
-		try {
-			localStorage.removeItem(dailyStorageKey(date, scopeKey));
-		} catch {
-			// ignore
-		}
-	}
-
-	function saveDailyProgress() {
-		if (typeof localStorage === 'undefined' || !currentRound?.dailyMeta || !dailyStateToken) return;
-		const state: SavedDailyState = {
-			date: currentRound.dailyMeta.date,
-			scopeKey: activeDailyScopeKey,
-			roundToken: currentRound.roundToken,
-			dailyStateToken,
-			imageUrl: currentRound.imageUrl,
-			attempts: dailyAttempts,
-			finished: dailyFinished,
-			won: dailyWon,
-			reveal: dailyReveal
-		};
-		try {
-			localStorage.setItem(dailyStorageKey(state.date, state.scopeKey), JSON.stringify(state));
-		} catch {
-			// ignore storage quota
-		}
+	function syncModeUrl(nextMode: GameMode) {
+		if (typeof window === 'undefined') return;
+		const url = new URL(window.location.href);
+		if (nextMode === 'classic') url.searchParams.delete('mode');
+		else url.searchParams.set('mode', nextMode);
+		window.history.replaceState({}, '', url.toString());
 	}
 
 	function applyDailyStateFromPayload(payload: RoundPayload) {
@@ -356,6 +313,7 @@
 
 	function resetAndStartMode(nextMode: GameMode) {
 		mode = nextMode;
+		syncModeUrl(nextMode);
 		activeReveal = null;
 		roundError = null;
 		guessInlineError = null;
@@ -390,7 +348,6 @@
 		const reqMode = mode;
 		const reqToken = currentRound.roundToken;
 		const reqSeq = roundRequestSeq;
-		const reqDailyDate = currentRound.dailyMeta?.date;
 		guessInlineError = null;
 		roundError = null;
 
@@ -438,7 +395,6 @@
 					reqMode === 'daily' &&
 					(res.status === 409 || res.status === 403 || /expired|mismatch|out of sync/i.test(errMsg))
 				) {
-					if (reqDailyDate) clearSavedDaily(reqDailyDate, activeDailyScopeKey);
 					roundError = 'Daily session refreshed — loading today’s puzzle.';
 					submitting = false;
 					fetchRound('daily');
@@ -467,7 +423,6 @@
 				if (wordleRes.reveal) {
 					dailyReveal = wordleRes.reveal;
 				}
-				saveDailyProgress();
 			} else {
 				const classicRes = data as ClassicGuessResponse;
 				activeReveal = classicRes;
@@ -589,6 +544,7 @@
 		avatar={profile.avatar}
 		eligibleShows={profile.eligibleShows}
 		isGlobalPool={profile.isGlobalPool}
+		dailyUnplayed={!dailyFinished}
 		onModeChange={(next) => {
 			if (next !== mode) resetAndStartMode(next);
 		}}
@@ -620,7 +576,7 @@
 			dailyPuzzleNumber={currentRound?.dailyMeta?.puzzleNumber}
 			dailyScopeLabel={currentRound?.dailyMeta?.scopeLabel}
 			dailyAttemptsCount={dailyAttempts.length}
-			dailyGaveUp={dailyAttempts.some((a) => a.guessedEpisode === 0 && a.guessedTitle === 'Gave up')}
+			dailyGaveUp={dailyAttempts.some((a) => a.gaveUp)}
 			{dailyWon}
 			{dailyFinished}
 		/>
@@ -660,9 +616,7 @@
 							imageUrl={currentRound?.imageUrl ?? null}
 							loading={profileLoading || roundLoading}
 							compact={true}
-							caption={dailyFinished
-								? `Daily #${currentRound?.dailyMeta?.puzzleNumber ?? ''} — full frame unlocked`
-								: `Daily #${currentRound?.dailyMeta?.puzzleNumber ?? ''}`}
+							caption=""
 							cropScale={dailyZoomScale}
 							allowInspect={dailyFinished}
 							onInspect={() => openInspect(currentRound?.imageUrl ?? null)}
@@ -678,6 +632,7 @@
 								disabled={profileLoading || roundLoading || !currentRound}
 								submitLabel="Submit attempt"
 								skipLabel="Give up"
+								confirmSkip={true}
 								episodeHint="↑↓ direction hints"
 								prefillTitle={dailyMatchedAnimeTitle}
 								inlineError={guessInlineError}
@@ -776,10 +731,10 @@
 		width: 100%;
 		max-width: 1180px;
 		margin: 0 auto;
-		padding: 18px 24px 120px;
+		padding: 16px 24px 28px;
 		display: flex;
 		flex-direction: column;
-		gap: 14px;
+		gap: 12px;
 	}
 
 	.daily-workspace {

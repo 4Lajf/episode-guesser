@@ -106,7 +106,7 @@
 		<div class="session-metrics">
 			<div class="metric">
 				<span class="metric-label">Status</span>
-				<span class="metric-val font-display" class:accent={!dailyFinished} class:hit={dailyWon}>
+				<span class="metric-val font-display" class:hit={dailyWon}>
 					{#if dailyFinished}
 						{dailyWon
 							? `Solved in ${dailyAttemptsCount}/${WORDLE_MAX_ATTEMPTS}`

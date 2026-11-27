@@ -322,7 +322,9 @@
 	}
 
 	.btn-load:disabled {
-		opacity: 0.45;
+		background: var(--ink-3);
+		color: var(--text-3);
+		border: 1px solid var(--rule);
 		cursor: not-allowed;
 	}
 

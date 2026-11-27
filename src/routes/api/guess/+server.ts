@@ -199,7 +199,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			yearDirection: null,
 			episodeStatus: 'miss' as const,
 			episodeDirection: null,
-			solved: false
+			solved: false,
+			gaveUp: true
 		};
 
 		saveDailyRecord(playerId, {

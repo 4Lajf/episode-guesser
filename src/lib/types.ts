@@ -95,6 +95,7 @@ export interface WordleAttemptFeedback {
 	episodeStatus: TileStatus;
 	episodeDirection: Direction;
 	solved: boolean;
+	gaveUp?: boolean;
 }
 
 export interface WordleGuessResponse {

@@ -121,16 +121,16 @@
 			var(--ink-1);
 		border: 1px solid var(--rule);
 		border-radius: var(--radius-lg);
-		padding: 16px 20px 14px;
+		padding: 12px 18px 10px;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 12px;
+		gap: 8px;
 	}
 
 	.light-table.compact {
-		padding: 12px 14px 12px;
-		gap: 9px;
+		padding: 12px 14px 10px;
+		gap: 8px;
 	}
 
 	.peg-bar {
@@ -167,11 +167,11 @@
 		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 	}
 
-	/* Wide hero capped cleanly by viewport height so 16:9 never crops and downward dropdown fits */
+	/* Sized so 16:9 frame + guessing console + downward 4-row dropdown fit inside 900px without scrolling */
 	.stage-shell {
 		position: relative;
-		width: min(100%, 880px, calc(max(320px, 100svh - 365px) * 16 / 9));
-		padding: 8px;
+		width: min(100%, 740px, calc(max(260px, 100svh - 465px) * 16 / 9));
+		padding: 7px;
 	}
 
 	.light-table.compact .stage-shell {
@@ -279,13 +279,13 @@
 	}
 
 	.table-footer {
-		width: min(100%, 880px, calc(max(320px, 100svh - 365px) * 16 / 9));
-		padding: 0 8px;
+		width: min(100%, 740px, calc(max(260px, 100svh - 465px) * 16 / 9));
+		padding: 0 7px;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		min-height: 28px;
+		min-height: 24px;
 	}
 
 	.light-table.compact .table-footer {

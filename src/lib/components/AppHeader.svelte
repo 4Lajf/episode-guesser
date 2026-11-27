@@ -7,6 +7,7 @@
 		avatar: string | null;
 		eligibleShows: number;
 		isGlobalPool: boolean;
+		dailyUnplayed?: boolean;
 		onModeChange: (mode: GameMode) => void;
 		onOpenSetup: () => void;
 	}
@@ -17,6 +18,7 @@
 		avatar,
 		eligibleShows,
 		isGlobalPool,
+		dailyUnplayed = true,
 		onModeChange,
 		onOpenSetup
 	}: Props = $props();
@@ -64,7 +66,7 @@
 					aria-pressed={mode === item.id}
 					onclick={() => onModeChange(item.id)}
 				>
-					{#if item.id === 'daily'}
+					{#if item.id === 'daily' && dailyUnplayed}
 						<span class="daily-dot" aria-hidden="true"></span>
 					{/if}
 					<span>{item.label}</span>

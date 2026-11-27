@@ -8,6 +8,7 @@
 		disabled?: boolean;
 		compact?: boolean;
 		skipLabel?: string;
+		confirmSkip?: boolean;
 		submitLabel?: string;
 		episodeHint?: string;
 		prefillTitle?: string;
@@ -23,6 +24,7 @@
 		disabled = false,
 		compact = false,
 		skipLabel = 'Skip frame',
+		confirmSkip = false,
 		submitLabel = 'Lock in guess',
 		episodeHint = 'Near misses still score',
 		prefillTitle = '',
@@ -36,10 +38,11 @@
 	let episodeText = $state('1');
 	let dropdownOpen = $state(false);
 	let activeIndex = $state(0);
+	let armedSkip = $state(false);
+	let skipArmTimer: ReturnType<typeof setTimeout> | null = null;
 
 	let titleInputEl = $state<HTMLInputElement | null>(null);
 	let episodeInputEl = $state<HTMLInputElement | null>(null);
-	let dropdownEl = $state<HTMLDivElement | null>(null);
 
 	// Precompute normalized titles once whenever title pool changes
 	const indexedTitles = $derived(
@@ -50,14 +53,30 @@
 		}))
 	);
 
-	// Keep the downward dropdown comfortably visible without ever covering the anime screencap
-	$effect(() => {
-		if (dropdownOpen && filteredTitles.length > 0) {
-			tick().then(() => {
-				dropdownEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-			});
+	function resetSkipArm() {
+		armedSkip = false;
+		if (skipArmTimer) {
+			clearTimeout(skipArmTimer);
+			skipArmTimer = null;
 		}
-	});
+	}
+
+	function handleSkipClick() {
+		if (!confirmSkip) {
+			onSkip();
+			return;
+		}
+		if (!armedSkip) {
+			armedSkip = true;
+			skipArmTimer = setTimeout(() => {
+				armedSkip = false;
+				skipArmTimer = null;
+			}, 4000);
+			return;
+		}
+		resetSkipArm();
+		onSkip();
+	}
 
 	// Reset inputs cleanly whenever a new round/attempt starts
 	$effect(() => {
@@ -66,6 +85,7 @@
 		episodeText = '1';
 		dropdownOpen = false;
 		activeIndex = 0;
+		resetSkipArm();
 
 		if (typeof window !== 'undefined' && window.innerWidth > 760) {
 			tick().then(() => {
@@ -225,7 +245,7 @@
 	<div class="field title-field">
 		<div class="field-head">
 			<label for="anime-combobox" class="field-label">Anime title</label>
-			<span class="field-hint desktop-only">Type title · ↑↓ Enter to pick</span>
+			<span class="field-hint desktop-only">↑↓ to pick, Enter to choose</span>
 		</div>
 
 		<div class="combobox-wrap">
@@ -271,6 +291,7 @@
 					type="button"
 					class="clear-btn"
 					aria-label="Clear anime title"
+					disabled={disabled || submitting}
 					onclick={() => {
 						titleQuery = '';
 						dropdownOpen = false;
@@ -284,7 +305,6 @@
 
 		{#if dropdownOpen && filteredTitles.length > 0}
 			<div
-				bind:this={dropdownEl}
 				id="anime-title-listbox"
 				class="dropdown"
 				role="listbox"
@@ -309,6 +329,10 @@
 						</span>
 					</button>
 				{/each}
+			</div>
+		{:else if dropdownOpen && titleQuery.trim().length >= 2 && filteredTitles.length === 0}
+			<div class="dropdown dropdown-empty" role="status">
+				No catalog match — press Enter to submit as typed
 			</div>
 		{/if}
 	</div>
@@ -380,10 +404,11 @@
 		<button
 			type="button"
 			class="btn-skip"
+			class:armed={armedSkip}
 			disabled={disabled || submitting}
-			onclick={onSkip}
+			onclick={handleSkipClick}
 		>
-			{skipLabel}
+			{armedSkip ? 'Confirm give up?' : skipLabel}
 		</button>
 	</div>
 
@@ -501,7 +526,7 @@
 		color: var(--text);
 	}
 
-	/* Always opens downward below the input so it NEVER covers the anime screencap */
+	/* Always opens downward below the input, sized to fit cleanly inside 900px without page scroll */
 	.dropdown {
 		position: absolute;
 		left: 0;
@@ -511,9 +536,15 @@
 		background: var(--ink-1);
 		border: 1px solid var(--rule-strong);
 		border-radius: var(--radius-md);
-		max-height: 240px;
+		max-height: 196px;
 		overflow-y: auto;
 		box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
+	}
+
+	.dropdown-empty {
+		padding: 10px 14px;
+		font-size: 13px;
+		color: var(--text-3);
 	}
 
 	.dropdown-opt {
@@ -681,6 +712,13 @@
 	.btn-skip:hover:not(:disabled) {
 		background: var(--ink-2);
 		color: var(--text);
+	}
+
+	.btn-skip.armed {
+		border-color: var(--danger);
+		background: var(--danger-soft);
+		color: #f8c2c9;
+		font-weight: 700;
 	}
 
 	.inline-error {

@@ -47,14 +47,24 @@ function consumeToken(
 	return { allowed: true, retryAfterSec: 0 };
 }
 
+let warnedFallbackIp = false;
+
 function getTrustedClientIp(event: Parameters<Handle>[0]['event']): string {
 	// Rely on @sveltejs/adapter-node's ADDRESS_HEADER + XFF_DEPTH (configured in Dockerfile)
 	// rather than reading an untrusted leftmost X-Forwarded-For value.
 	try {
-		return event.getClientAddress() || 'unknown';
+		const addr = event.getClientAddress();
+		if (addr) return addr;
 	} catch {
-		return 'unknown';
+		// fall through
 	}
+	if (!warnedFallbackIp) {
+		warnedFallbackIp = true;
+		console.warn(
+			'[episode-guesser] Could not resolve client IP via adapter-node; verify ADDRESS_HEADER / XFF_DEPTH.'
+		);
+	}
+	return 'unknown';
 }
 
 export const handle: Handle = async ({ event, resolve }) => {

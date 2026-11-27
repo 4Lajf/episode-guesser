@@ -26,6 +26,21 @@ const FLUSH_DELAY_MS = 1_500;
 const store = new Map<string, DailyServerRecord>();
 let hydrated = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let shutdownHooked = false;
+
+function ensureShutdownHooks(): void {
+	if (shutdownHooked) return;
+	shutdownHooked = true;
+	const flushOnExit = () => {
+		if (flushTimer) {
+			clearTimeout(flushTimer);
+			flushToDiskNow();
+		}
+	};
+	process.once('SIGTERM', flushOnExit);
+	process.once('SIGINT', flushOnExit);
+	process.once('beforeExit', flushOnExit);
+}
 
 function hydrateFromDisk(): void {
 	if (hydrated) return;
@@ -61,6 +76,7 @@ function flushToDiskNow(): void {
 }
 
 function schedulePersist(): void {
+	ensureShutdownHooks();
 	if (flushTimer) return;
 	flushTimer = setTimeout(flushToDiskNow, FLUSH_DELAY_MS);
 	if (typeof flushTimer === 'object' && 'unref' in flushTimer) {

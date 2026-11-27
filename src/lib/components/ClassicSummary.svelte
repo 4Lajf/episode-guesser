@@ -177,7 +177,7 @@
 	.round-list {
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		border-top: 1px solid var(--rule);
 	}
 
 	.round-item {
@@ -185,10 +185,13 @@
 		grid-template-columns: 128px minmax(0, 1fr) auto;
 		gap: 14px;
 		align-items: center;
-		background: var(--ink-2);
-		border: 1px solid var(--rule);
-		border-radius: var(--radius-md);
-		padding: 10px 14px 10px 10px;
+		padding: 12px 4px;
+		border-bottom: 1px solid var(--rule);
+	}
+
+	.round-item:last-child {
+		border-bottom: 0;
+		padding-bottom: 0;
 	}
 
 	.thumb-wrap {

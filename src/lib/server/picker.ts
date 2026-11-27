@@ -78,6 +78,71 @@ function shuffleWithRng<T>(items: T[], rng: () => number): T[] {
 	return arr;
 }
 
+interface ResolvedDailyPick {
+	rawImageUrl: string;
+	originX: number;
+	originY: number;
+	targetTitles: string[];
+	franchiseTitles: string[];
+	reveal: Omit<EpisodeReveal, 'imageUrl'>;
+	cachedAt: number;
+}
+
+const resolvedDailyPickCache = new Map<string, ResolvedDailyPick>();
+const DAILY_PICK_TTL_MS = 36 * 60 * 60 * 1000;
+
+function sealDailyFromCachedPick(
+	pick: ResolvedDailyPick,
+	dailyBinding: { dailyDate: string; scopeKey: string; playerId: string }
+) {
+	const fullImageUrl = mintImageUrl(pick.rawImageUrl);
+	const initialImageUrl = mintImageUrl(pick.rawImageUrl, {
+		scale: WORDLE_ZOOM_STEPS[0],
+		originX: pick.originX,
+		originY: pick.originY
+	});
+	const roundId = randomUUID();
+	const reveal: EpisodeReveal = { ...pick.reveal, imageUrl: fullImageUrl };
+
+	const roundToken = sealPayload<SealedRoundSecret>({
+		typ: 'round',
+		v: 1,
+		roundId,
+		mode: 'daily',
+		createdAt: Date.now(),
+		rawImageUrl: pick.rawImageUrl,
+		originX: pick.originX,
+		originY: pick.originY,
+		targetTitles: pick.targetTitles,
+		franchiseTitles: pick.franchiseTitles,
+		reveal,
+		dailyDate: dailyBinding.dailyDate,
+		scopeKey: dailyBinding.scopeKey,
+		playerId: dailyBinding.playerId
+	});
+
+	const dailyStateToken = sealPayload<SealedDailyState>({
+		typ: 'daily',
+		v: 1,
+		roundId,
+		dailyDate: dailyBinding.dailyDate,
+		scopeKey: dailyBinding.scopeKey,
+		playerId: dailyBinding.playerId,
+		attemptsUsed: 0,
+		finished: false,
+		usedKeys: []
+	});
+
+	return {
+		roundId,
+		roundToken,
+		dailyStateToken,
+		imageUrl: initialImageUrl,
+		originX: pick.originX,
+		originY: pick.originY
+	};
+}
+
 export async function pickRoundFromPool(params: {
 	pool: AnimePoolItem[];
 	mode: GameMode;
@@ -99,6 +164,15 @@ export async function pickRoundFromPool(params: {
 	const { pool, mode, excludeMediaIds = [], seed, dailyBinding } = params;
 	if (pool.length === 0) {
 		throw new Error('No eligible anime found in this list. Try including more list statuses.');
+	}
+
+	// Reuse the first resolved Daily pick for (date, scopeKey) so all players share the exact same Global Daily
+	if (mode === 'daily' && dailyBinding) {
+		const dailyKey = `${dailyBinding.dailyDate}|${dailyBinding.scopeKey}`;
+		const cachedPick = resolvedDailyPickCache.get(dailyKey);
+		if (cachedPick && Date.now() - cachedPick.cachedAt < DAILY_PICK_TTL_MS) {
+			return sealDailyFromCachedPick(cachedPick, dailyBinding);
+		}
 	}
 
 	const rng = seed ? seededRandom(seed) : Math.random;
@@ -223,6 +297,24 @@ export async function pickRoundFromPool(params: {
 							usedKeys: []
 						})
 					: undefined;
+
+			if (mode === 'daily' && dailyBinding) {
+				const dailyKey = `${dailyBinding.dailyDate}|${dailyBinding.scopeKey}`;
+				if (resolvedDailyPickCache.size > 500) {
+					const first = resolvedDailyPickCache.keys().next().value;
+					if (first) resolvedDailyPickCache.delete(first);
+				}
+				const { imageUrl: _omit, ...revealWithoutImg } = reveal;
+				resolvedDailyPickCache.set(dailyKey, {
+					rawImageUrl: picked.image,
+					originX,
+					originY,
+					targetTitles,
+					franchiseTitles: show.franchiseTitles,
+					reveal: revealWithoutImg,
+					cachedAt: Date.now()
+				});
+			}
 
 			return {
 				roundId,
