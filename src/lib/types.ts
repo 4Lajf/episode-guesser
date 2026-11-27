@@ -1,8 +1,31 @@
 export type GameMode = 'classic' | 'unlimited' | 'daily';
 
+export type NavTab = GameMode | 'archive';
+
 export type ListStatus = 'COMPLETED' | 'CURRENT' | 'PAUSED' | 'DROPPED' | 'REPEATING';
 
 export type GlobalPoolSize = 1000 | 249;
+
+export type ArchiveDayStatus = 'unplayed' | 'in_progress' | 'won' | 'lost' | 'gave_up';
+
+export interface ArchiveDaySummary {
+	date: string;
+	puzzleNumber: number;
+	status: ArchiveDayStatus;
+	attemptsUsed: number;
+	animeHitAttempt: number | null;
+	leaderboardCount: number;
+	leaderboardSolved: number;
+}
+
+export interface DailyArchivePayload {
+	today: string;
+	startDate: string;
+	totalDays: number;
+	solvedCount: number;
+	playedCount: number;
+	days: ArchiveDaySummary[];
+}
 
 export interface AuthUser {
 	anilistUserId: number;
@@ -91,6 +114,7 @@ export interface RoundPayload {
 		date: string;
 		puzzleNumber: number;
 		scopeLabel: string;
+		isArchive?: boolean;
 		maxAttempts: number;
 		zoomSteps: number[];
 	};

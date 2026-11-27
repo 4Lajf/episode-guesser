@@ -1,5 +1,4 @@
 import { redirect } from '@sveltejs/kit';
-import { getTodayUtcDate } from '$lib/scoring';
 import {
 	consumeOAuthStateCookie,
 	getAniListOAuthConfig,
@@ -7,7 +6,7 @@ import {
 	PLAYER_COOKIE,
 	setAuthUserCookie
 } from '$lib/server/auth';
-import { getDailyRecord, saveDailyRecord } from '$lib/server/dailyStore';
+import { getDailyRecord, listPlayerDailyRecords, saveDailyRecord } from '$lib/server/dailyStore';
 import { hasLeaderboardEntry, recordDailyLeaderboardResult } from '$lib/server/leaderboardStore';
 import type { SealedDailyState, SealedRoundSecret } from '$lib/server/picker';
 import { sealPayload, unsealPayload } from '$lib/server/token';
@@ -115,42 +114,42 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 
 	setAuthUserCookie(cookies, authUser, url.protocol === 'https:');
 
-	// Seamlessly claim today's guest Daily progress (or finished result) into the verified AniList account
-	// if this AniList account hasn't played today's Daily yet.
+	// Seamlessly claim any guest Daily progress (today + archive days!) into the verified AniList account
+	// for any dates this AniList account hasn't played yet.
 	const guestPid = cookies.get(PLAYER_COOKIE);
 	const authPlayerId = `al:${authUser.anilistUserId}`;
-	const todayUtc = getTodayUtcDate();
 
 	if (guestPid) {
-		const guestRec = getDailyRecord(guestPid, todayUtc, 'global');
-		const existingAuthRec = getDailyRecord(authPlayerId, todayUtc, 'global');
-		if (guestRec && !existingAuthRec) {
+		const guestRecords = listPlayerDailyRecords(guestPid, 'global');
+		for (const guestRec of guestRecords) {
+			const existingAuthRec = getDailyRecord(authPlayerId, guestRec.date, 'global');
+			if (existingAuthRec) continue;
 			const unsealedRound = unsealPayload<SealedRoundSecret>(guestRec.roundToken);
 			const unsealedState = unsealPayload<SealedDailyState>(guestRec.dailyStateToken);
-			if (unsealedRound && unsealedState) {
-				const migratedRoundToken = sealPayload<SealedRoundSecret>({
-					...unsealedRound,
-					playerId: authPlayerId
+			if (!unsealedRound || !unsealedState) continue;
+
+			const migratedRoundToken = sealPayload<SealedRoundSecret>({
+				...unsealedRound,
+				playerId: authPlayerId
+			});
+			const migratedStateToken = sealPayload<SealedDailyState>({
+				...unsealedState,
+				playerId: authPlayerId
+			});
+			saveDailyRecord(authPlayerId, {
+				...guestRec,
+				roundToken: migratedRoundToken,
+				dailyStateToken: migratedStateToken
+			});
+			if (guestRec.finished && !hasLeaderboardEntry(guestRec.date, authUser.anilistUserId)) {
+				recordDailyLeaderboardResult({
+					date: guestRec.date,
+					user: authUser,
+					attempts: guestRec.attempts,
+					won: guestRec.won,
+					startedAt: unsealedRound.createdAt,
+					completedAt: guestRec.updatedAt
 				});
-				const migratedStateToken = sealPayload<SealedDailyState>({
-					...unsealedState,
-					playerId: authPlayerId
-				});
-				saveDailyRecord(authPlayerId, {
-					...guestRec,
-					roundToken: migratedRoundToken,
-					dailyStateToken: migratedStateToken
-				});
-				if (guestRec.finished && !hasLeaderboardEntry(todayUtc, authUser.anilistUserId)) {
-					recordDailyLeaderboardResult({
-						date: todayUtc,
-						user: authUser,
-						attempts: guestRec.attempts,
-						won: guestRec.won,
-						startedAt: unsealedRound.createdAt,
-						completedAt: guestRec.updatedAt
-					});
-				}
 			}
 		}
 	}

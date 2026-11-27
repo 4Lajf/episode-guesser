@@ -4,6 +4,7 @@ import { CURATED_GLOBAL_POOL, getGlobalPool } from '$lib/curated';
 import {
 	getDailyPuzzleNumber,
 	getTodayUtcDate,
+	isValidDailyArchiveDate,
 	WORDLE_MAX_ATTEMPTS,
 	WORDLE_ZOOM_STEPS
 } from '$lib/scoring';
@@ -23,6 +24,7 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 		statuses?: ListStatus[];
 		includeSingleEp?: boolean;
 		mode?: GameMode;
+		dailyDate?: string;
 		excludeMediaIds?: number[];
 	};
 
@@ -75,12 +77,25 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 		}
 
 		const todayUtc = getTodayUtcDate();
+		let targetDate = todayUtc;
+		if (mode === 'daily' && body.dailyDate) {
+			const cleanDate = body.dailyDate.trim();
+			if (!isValidDailyArchiveDate(cleanDate, todayUtc)) {
+				return json(
+					{ error: 'Requested archive date is out of range or in the future.' },
+					{ status: 400 }
+				);
+			}
+			targetDate = cleanDate;
+		}
+		const isArchive = targetDate !== todayUtc;
+		const effectiveScopeLabel = isArchive ? 'Archive · Top 1,000' : scopeLabel;
 
 		// Server-enforced Daily session: restore existing in-progress/completed record instead of minting a fresh reset.
 		// Zero-attempt sessions are NOT persisted until the player submits their first guess, preventing
 		// anonymous/cookie-less traffic from filling daily-store.json.
 		if (mode === 'daily') {
-			const existing = getDailyRecord(playerId, todayUtc, scopeKey);
+			const existing = getDailyRecord(playerId, targetDate, scopeKey);
 			const existingValid = existing ? unsealPayload<SealedRoundSecret>(existing.roundToken) : null;
 			if (existing && existingValid && existingValid.typ === 'round') {
 				const restored: RoundPayload = {
@@ -89,9 +104,10 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 					imageUrl: existing.currentImageUrl,
 					mode: 'daily',
 					dailyMeta: {
-						date: todayUtc,
-						puzzleNumber: getDailyPuzzleNumber(todayUtc),
-						scopeLabel,
+						date: targetDate,
+						puzzleNumber: getDailyPuzzleNumber(targetDate),
+						scopeLabel: effectiveScopeLabel,
+						isArchive,
 						maxAttempts: WORDLE_MAX_ATTEMPTS,
 						zoomSteps: [...WORDLE_ZOOM_STEPS]
 					},
@@ -106,7 +122,7 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 			}
 		}
 
-		const seed = mode === 'daily' ? `episode-guesser-daily:${todayUtc}:${seedKey}` : undefined;
+		const seed = mode === 'daily' ? `episode-guesser-daily:${targetDate}:${seedKey}` : undefined;
 
 		const picked = await pickRoundFromPool({
 			pool,
@@ -116,7 +132,7 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 			...(mode === 'daily'
 				? {
 						dailyBinding: {
-							dailyDate: todayUtc,
+							dailyDate: targetDate,
 							scopeKey,
 							playerId
 						}
@@ -132,9 +148,10 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 			...(mode === 'daily'
 				? {
 						dailyMeta: {
-							date: todayUtc,
-							puzzleNumber: getDailyPuzzleNumber(todayUtc),
-							scopeLabel,
+							date: targetDate,
+							puzzleNumber: getDailyPuzzleNumber(targetDate),
+							scopeLabel: effectiveScopeLabel,
+							isArchive,
 							maxAttempts: WORDLE_MAX_ATTEMPTS,
 							zoomSteps: [...WORDLE_ZOOM_STEPS]
 						}

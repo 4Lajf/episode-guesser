@@ -18,8 +18,8 @@ export interface DailyServerRecord {
 	updatedAt: number;
 }
 
-const MAX_RECORDS = 10_000;
-const RECORD_TTL_MS = 36 * 60 * 60 * 1000;
+const MAX_RECORDS = 100_000;
+const RECORD_TTL_MS = 400 * 24 * 60 * 60 * 1000; // Retain full 1-year archive + buffer
 const FLUSH_DELAY_MS = 2_000;
 
 const store = new Map<string, DailyServerRecord>();
@@ -177,6 +177,23 @@ export function saveDailyRecord(playerId: string, record: DailyServerRecord): vo
 	const key = makeKey(playerId, record.date, record.scopeKey);
 	store.set(key, { ...record, updatedAt: Date.now() });
 	schedulePersist();
+}
+
+export function listPlayerDailyRecords(
+	playerId: string,
+	scopeKey = 'global'
+): DailyServerRecord[] {
+	hydrateFromDisk();
+	const prefix = `${playerId}|`;
+	const suffix = `|${scopeKey}`;
+	const out: DailyServerRecord[] = [];
+	const now = Date.now();
+	for (const [k, rec] of store) {
+		if (k.startsWith(prefix) && k.endsWith(suffix) && now - rec.updatedAt <= RECORD_TTL_MS) {
+			out.push(rec);
+		}
+	}
+	return out;
 }
 
 export function clearDailyStoreForTests(): void {

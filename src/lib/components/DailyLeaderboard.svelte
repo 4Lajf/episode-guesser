@@ -9,6 +9,8 @@
 		dailyFinished: boolean;
 		dailyWon: boolean;
 		dailyAttemptsCount: number;
+		puzzleDate?: string;
+		isArchive?: boolean;
 		onRefresh: () => void;
 	}
 
@@ -19,8 +21,26 @@
 		dailyFinished,
 		dailyWon,
 		dailyAttemptsCount,
+		puzzleDate = '',
+		isArchive = false,
 		onRefresh
 	}: Props = $props();
+
+	const loginReturnUrl = $derived(
+		isArchive && puzzleDate ? `/?date=${encodeURIComponent(puzzleDate)}` : '/'
+	);
+
+	function formatNiceDate(iso: string): string {
+		if (!iso) return '';
+		const d = new Date(`${iso}T00:00:00Z`);
+		if (Number.isNaN(d.getTime())) return iso;
+		return d.toLocaleDateString('en-GB', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric',
+			timeZone: 'UTC'
+		});
+	}
 
 	function formatSolveTime(ms: number): string {
 		const sec = Math.max(1, Math.round(ms / 1000));
@@ -53,6 +73,9 @@
 				Global Daily Leaderboard
 				{#if leaderboard}
 					<span class="lb-num tnum">#{leaderboard.puzzleNumber}</span>
+				{/if}
+				{#if isArchive && puzzleDate}
+					<span class="lb-date">{formatNiceDate(puzzleDate)}</span>
 				{/if}
 			</h2>
 			<p class="lb-sub">
@@ -92,7 +115,7 @@
 			</div>
 
 			{#if authConfigured}
-				<a class="lb-login-btn" href="/api/auth/anilist/login?returnTo=/">
+				<a class="lb-login-btn" href="/api/auth/anilist/login?returnTo={encodeURIComponent(loginReturnUrl)}">
 					Log in with AniList
 				</a>
 			{:else}
@@ -201,6 +224,12 @@
 		font-size: 15px;
 		font-weight: 600;
 		color: var(--text-3);
+	}
+
+	.lb-date {
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--text-2);
 	}
 
 	.lb-sub {

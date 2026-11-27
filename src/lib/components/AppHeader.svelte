@@ -1,8 +1,8 @@
 <script lang="ts">
-	import type { AuthUser, GameMode } from '$lib/types';
+	import type { AuthUser, NavTab } from '$lib/types';
 
 	interface Props {
-		mode: GameMode;
+		activeTab: NavTab;
 		username: string;
 		avatar: string | null;
 		eligibleShows: number;
@@ -10,12 +10,12 @@
 		authUser?: AuthUser | null;
 		authConfigured?: boolean;
 		dailyUnplayed?: boolean;
-		onModeChange: (mode: GameMode) => void;
+		onTabChange: (tab: NavTab) => void;
 		onOpenSetup: () => void;
 	}
 
 	let {
-		mode,
+		activeTab,
 		username,
 		avatar,
 		eligibleShows,
@@ -23,7 +23,7 @@
 		authUser = null,
 		authConfigured = false,
 		dailyUnplayed = true,
-		onModeChange,
+		onTabChange,
 		onOpenSetup
 	}: Props = $props();
 
@@ -49,8 +49,9 @@
 						.toUpperCase() || 'A'
 	);
 
-	const modes: Array<{ id: GameMode; label: string }> = [
+	const modes: Array<{ id: NavTab; label: string }> = [
 		{ id: 'daily', label: 'Daily frame' },
+		{ id: 'archive', label: 'Archive' },
 		{ id: 'classic', label: 'Classic' },
 		{ id: 'unlimited', label: 'Unlimited' }
 	];
@@ -64,7 +65,7 @@
 				href="/"
 				onclick={(e) => {
 					e.preventDefault();
-					onModeChange('daily');
+					onTabChange('daily');
 				}}
 			>
 				<svg class="brand-mark" viewBox="0 0 28 20" aria-hidden="true">
@@ -88,8 +89,8 @@
 					<button
 						type="button"
 						class="mode-tab"
-						aria-current={mode === item.id ? 'page' : undefined}
-						onclick={() => onModeChange(item.id)}
+						aria-current={activeTab === item.id ? 'page' : undefined}
+						onclick={() => onTabChange(item.id)}
 					>
 						{#if item.id === 'daily' && dailyUnplayed}
 							<span class="daily-dot" aria-hidden="true"></span>
@@ -366,7 +367,7 @@
 		.modes {
 			grid-area: modes;
 			display: grid;
-			grid-template-columns: repeat(3, minmax(0, 1fr));
+			grid-template-columns: repeat(4, minmax(0, 1fr));
 			height: 42px;
 		}
 

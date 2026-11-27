@@ -9,7 +9,7 @@ import type {
 	WordleAttemptFeedback
 } from '$lib/types';
 
-const MAX_DAYS_RETAINED = 14;
+const MAX_DAYS_RETAINED = 500;
 const MAX_RETURNED_ENTRIES = 50;
 const FLUSH_DELAY_MS = 1_500;
 
@@ -218,6 +218,19 @@ export function recordDailyLeaderboardResult(params: {
 export function hasLeaderboardEntry(date: string, anilistUserId: number): boolean {
 	hydrateFromDisk();
 	return Boolean(boardsByDate.get(date)?.has(anilistUserId));
+}
+
+export function getLeaderboardCountsByDate(): Map<string, { total: number; solved: number }> {
+	hydrateFromDisk();
+	const out = new Map<string, { total: number; solved: number }>();
+	for (const [date, map] of boardsByDate) {
+		let solved = 0;
+		for (const e of map.values()) {
+			if (e.won) solved++;
+		}
+		out.set(date, { total: map.size, solved });
+	}
+	return out;
 }
 
 export function getDailyLeaderboard(

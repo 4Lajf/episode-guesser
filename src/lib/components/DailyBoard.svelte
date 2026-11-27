@@ -10,6 +10,9 @@
 		puzzleNumber: number;
 		puzzleDate: string;
 		scopeLabel: string;
+		isArchive?: boolean;
+		canGoPrevDay?: boolean;
+		canGoNextDay?: boolean;
 		attempts: WordleAttemptFeedback[];
 		finished: boolean;
 		won: boolean;
@@ -18,6 +21,10 @@
 		lockedYear?: number | null;
 		liveEpisode?: number;
 		hintText?: string;
+		onPrevDay?: () => void;
+		onNextDay?: () => void;
+		onGoToday?: () => void;
+		onOpenArchive?: () => void;
 		onSwitchClassic?: () => void;
 		onSwitchUnlimited?: () => void;
 	}
@@ -26,6 +33,9 @@
 		puzzleNumber,
 		puzzleDate,
 		scopeLabel,
+		isArchive = false,
+		canGoPrevDay = false,
+		canGoNextDay = false,
 		attempts,
 		finished,
 		won,
@@ -34,6 +44,10 @@
 		lockedYear = null,
 		liveEpisode = 1,
 		hintText = '',
+		onPrevDay,
+		onNextDay,
+		onGoToday,
+		onOpenArchive,
 		onSwitchClassic,
 		onSwitchUnlimited
 	}: Props = $props();
@@ -515,7 +529,9 @@
 	{#if finished && reveal}
 		<div class="daily-finished">
 			<div class="answer-block">
-				<p class="answer-kicker">Today’s answer</p>
+				<p class="answer-kicker">
+					{isArchive ? `Daily #${puzzleNumber} answer · ${formatNiceDate(puzzleDate)}` : 'Today’s answer'}
+				</p>
 				<h3 class="answer-title">{reveal.titleRomaji}</h3>
 				{#if showEnglish}
 					<p class="answer-sub">{reveal.titleEnglish}</p>
@@ -688,7 +704,11 @@
 				</svg>
 
 				<div class="share-foot">
-					<p class="countdown">Next daily frame in {resetCountdown}.</p>
+					{#if isArchive}
+						<p class="countdown">Archive puzzle · {formatNiceDate(puzzleDate)}</p>
+					{:else}
+						<p class="countdown">Next daily frame in {resetCountdown}.</p>
+					{/if}
 					<div class="share-actions">
 						<button type="button" class="outline" onclick={copyShareImage}>
 							{#if copiedImage === 'copied'}
@@ -704,20 +724,37 @@
 						</button>
 					</div>
 
-					{#if onSwitchClassic || onSwitchUnlimited}
-						<div class="play-more">
-							{#if onSwitchClassic}
-								<button type="button" class="primary-next" onclick={onSwitchClassic}>
-									Play Classic
-								</button>
-							{/if}
-							{#if onSwitchUnlimited}
-								<button type="button" class="quiet" onclick={onSwitchUnlimited}>
-									Play Unlimited
-								</button>
-							{/if}
-						</div>
-					{/if}
+					<div class="play-more">
+						{#if isArchive && canGoPrevDay && onPrevDay}
+							<button type="button" class="primary-next" onclick={onPrevDay}>
+								← Previous day
+							</button>
+						{/if}
+						{#if isArchive && canGoNextDay && onNextDay}
+							<button type="button" class="outline" onclick={onNextDay}>
+								Next day →
+							</button>
+						{/if}
+						{#if !isArchive && onOpenArchive}
+							<button type="button" class="primary-next" onclick={onOpenArchive}>
+								Play Archive (366 days)
+							</button>
+						{:else if isArchive && onGoToday}
+							<button type="button" class="quiet" onclick={onGoToday}>
+								Today’s Daily
+							</button>
+						{/if}
+						{#if onSwitchClassic}
+							<button type="button" class="quiet" onclick={onSwitchClassic}>
+								Play Classic
+							</button>
+						{/if}
+						{#if onSwitchUnlimited}
+							<button type="button" class="quiet" onclick={onSwitchUnlimited}>
+								Play Unlimited
+							</button>
+						{/if}
+					</div>
 				</div>
 			</div>
 		</div>

@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import ClassicSummary from '$lib/components/ClassicSummary.svelte';
+	import DailyArchive from '$lib/components/DailyArchive.svelte';
 	import DailyBoard from '$lib/components/DailyBoard.svelte';
 	import DailyLeaderboard from '$lib/components/DailyLeaderboard.svelte';
 	import DailyZoomLadder from '$lib/components/DailyZoomLadder.svelte';
@@ -15,8 +16,11 @@
 	import {
 		CLASSIC_ROUNDS,
 		CURATED_POOL_SIZE,
+		DAILY_EPOCH_DATE,
 		getTodayUtcDate,
+		isValidDailyArchiveDate,
 		normalizeTitle,
+		shiftUtcDate,
 		UNLIMITED_MAX_LIVES,
 		WORDLE_ZOOM_STEPS
 	} from '$lib/scoring';
@@ -25,11 +29,13 @@
 		AutocompleteEntry,
 		ClassicGuessResponse,
 		CompletedClassicRound,
+		DailyArchivePayload,
 		DailyLeaderboardPayload,
 		EpisodeReveal,
 		GameMode,
 		GlobalPoolSize,
 		ListStatus,
+		NavTab,
 		RoundPayload,
 		WordleAttemptFeedback,
 		WordleGuessResponse
@@ -60,6 +66,8 @@
 	let globalPoolSize = $state<GlobalPoolSize>(1000);
 	let leaderboard = $state<DailyLeaderboardPayload | null>(null);
 	let leaderboardLoading = $state(false);
+	let archive = $state<DailyArchivePayload | null>(null);
+	let archiveLoading = $state(false);
 
 	let profile = $state<PublicProfile>({
 		username: 'Global Top 1,000',
@@ -85,7 +93,9 @@
 		reason: string;
 	} | null>(null);
 
+	let activeTab = $state<NavTab>('daily');
 	let mode = $state<GameMode>('daily');
+	let selectedDailyDate = $state<string>(getTodayUtcDate());
 	let roundLoading = $state(false);
 	let roundError = $state<string | null>(null);
 	let roundNotice = $state<string | null>(null);
@@ -149,6 +159,9 @@
 	const dropdownEntries = $derived(autocompleteEntries);
 
 	const dailyScopeHintKey = $derived(`${getTodayUtcDate()}|global`);
+	const dailyIsArchive = $derived(selectedDailyDate !== getTodayUtcDate());
+	const canGoPrevDay = $derived(selectedDailyDate > DAILY_EPOCH_DATE);
+	const canGoNextDay = $derived(selectedDailyDate < getTodayUtcDate());
 
 	const activeRunWarning = $derived.by(() => {
 		if (classicHistory.length > 0 && !classicFinished) {
@@ -262,11 +275,18 @@
 		return '';
 	});
 
-	function syncModeUrl(nextMode: GameMode) {
+	function syncUrlState(tab: NavTab, dateStr: string = selectedDailyDate) {
 		if (typeof window === 'undefined') return;
 		const url = new URL(window.location.href);
-		if (nextMode === 'daily') url.searchParams.delete('mode');
-		else url.searchParams.set('mode', nextMode);
+		const today = getTodayUtcDate();
+		if (tab === 'daily') {
+			url.searchParams.delete('mode');
+			if (dateStr && dateStr !== today) url.searchParams.set('date', dateStr);
+			else url.searchParams.delete('date');
+		} else {
+			url.searchParams.set('mode', tab);
+			url.searchParams.delete('date');
+		}
 		window.history.replaceState({}, '', url.toString());
 	}
 
@@ -277,13 +297,16 @@
 	}
 
 	function applyDailyStateFromPayload(payload: RoundPayload) {
+		const isTodayPayload = !payload.dailyMeta?.isArchive;
 		if (payload.dailyRestore) {
 			dailyAttempts = payload.dailyRestore.attempts;
 			dailyFinished = payload.dailyRestore.finished;
 			dailyWon = payload.dailyRestore.won;
 			dailyReveal = payload.dailyRestore.reveal ?? null;
 			dailyStateToken = payload.dailyStateToken ?? null;
-			writeDailyDoneHint(dailyScopeHintKey, payload.dailyRestore.finished);
+			if (isTodayPayload) {
+				writeDailyDoneHint(dailyScopeHintKey, payload.dailyRestore.finished);
+			}
 			return;
 		}
 
@@ -292,7 +315,9 @@
 		dailyWon = false;
 		dailyReveal = null;
 		dailyStateToken = payload.dailyStateToken ?? null;
-		writeDailyDoneHint(dailyScopeHintKey, false);
+		if (isTodayPayload) {
+			writeDailyDoneHint(dailyScopeHintKey, false);
+		}
 	}
 
 	function saveRecentUser(name: string) {
@@ -341,16 +366,32 @@
 		}
 	}
 
-	async function loadLeaderboard() {
+	async function loadLeaderboard(dateStr: string = selectedDailyDate) {
 		leaderboardLoading = true;
 		try {
-			const res = await fetch('/api/leaderboard');
+			const res = await fetch(`/api/leaderboard?date=${encodeURIComponent(dateStr)}`);
 			if (!res.ok) return;
-			leaderboard = (await res.json()) as DailyLeaderboardPayload;
+			const data = (await res.json()) as DailyLeaderboardPayload;
+			if (dateStr === selectedDailyDate) {
+				leaderboard = data;
+			}
 		} catch {
 			// ignore
 		} finally {
 			leaderboardLoading = false;
+		}
+	}
+
+	async function loadArchive() {
+		archiveLoading = true;
+		try {
+			const res = await fetch('/api/archive');
+			if (!res.ok) return;
+			archive = (await res.json()) as DailyArchivePayload;
+		} catch {
+			// ignore
+		} finally {
+			archiveLoading = false;
 		}
 	}
 
@@ -368,9 +409,10 @@
 		dailyWon = false;
 		dailyReveal = null;
 		dailyStateToken = null;
-		loadLeaderboard();
+		loadLeaderboard(selectedDailyDate);
+		loadArchive();
 		if (mode === 'daily') {
-			fetchRound('daily');
+			fetchRound('daily', null, selectedDailyDate);
 		}
 	}
 
@@ -492,7 +534,11 @@
 		}
 	}
 
-	async function fetchRound(targetMode: GameMode, notice: string | null = null) {
+	async function fetchRound(
+		targetMode: GameMode,
+		notice: string | null = null,
+		overrideDailyDate?: string
+	) {
 		const seq = ++roundRequestSeq;
 		activeRoundAbort?.abort();
 		const controller = new AbortController();
@@ -508,6 +554,7 @@
 
 		try {
 			const useGlobalPool = targetMode === 'daily' || profile.isGlobalPool;
+			const targetDate = overrideDailyDate ?? selectedDailyDate;
 			const excludeMediaIds =
 				targetMode === 'classic'
 					? Array.from(new Set([...classicSeenIds, ...recentMediaIds]))
@@ -520,6 +567,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					mode: targetMode,
+					dailyDate: targetMode === 'daily' ? targetDate : undefined,
 					username: useGlobalPool ? undefined : profile.username,
 					useGlobalPool,
 					globalPoolSize,
@@ -559,8 +607,56 @@
 		}
 	}
 
+	function openDailyDate(dateStr: string) {
+		if (!isValidDailyArchiveDate(dateStr)) return;
+		activeTab = 'daily';
+		mode = 'daily';
+		selectedDailyDate = dateStr;
+		syncUrlState('daily', dateStr);
+		roundError = null;
+		guessInlineError = null;
+		submitting = false;
+		dailyRound = null;
+		dailyAttempts = [];
+		dailyFinished = false;
+		dailyWon = false;
+		dailyReveal = null;
+		dailyStateToken = null;
+		fetchRound('daily', null, dateStr);
+		loadLeaderboard(dateStr);
+	}
+
+	function goPrevDay() {
+		if (!canGoPrevDay) return;
+		openDailyDate(shiftUtcDate(selectedDailyDate, -1));
+	}
+
+	function goNextDay() {
+		if (!canGoNextDay) return;
+		openDailyDate(shiftUtcDate(selectedDailyDate, 1));
+	}
+
+	function goToday() {
+		openDailyDate(getTodayUtcDate());
+	}
+
+	function switchTab(nextTab: NavTab) {
+		if (nextTab === 'archive') {
+			activeTab = 'archive';
+			syncUrlState('archive');
+			roundError = null;
+			guessInlineError = null;
+			loadArchive();
+			return;
+		}
+		activeTab = nextTab;
+		switchMode(nextTab);
+	}
+
 	function switchMode(nextMode: GameMode) {
+		activeTab = nextMode;
 		if (nextMode === mode) {
+			syncUrlState(nextMode);
 			if (
 				!currentRound &&
 				!roundLoading &&
@@ -572,7 +668,7 @@
 			return;
 		}
 		mode = nextMode;
-		syncModeUrl(nextMode);
+		syncUrlState(nextMode);
 		roundError = null;
 		guessInlineError = null;
 		submitting = false;
@@ -590,8 +686,9 @@
 	}
 
 	function restartClassicRun() {
+		activeTab = 'classic';
 		mode = 'classic';
-		syncModeUrl('classic');
+		syncUrlState('classic');
 		classicRound = null;
 		classicReveal = null;
 		classicRoundIndex = 0;
@@ -604,8 +701,9 @@
 	}
 
 	function restartUnlimitedRun() {
+		activeTab = 'unlimited';
 		mode = 'unlimited';
-		syncModeUrl('unlimited');
+		syncUrlState('unlimited');
 		unlimitedRound = null;
 		unlimitedReveal = null;
 		unlimitedCount = 0;
@@ -703,9 +801,12 @@
 					dailyReveal = wordleRes.reveal;
 				}
 				if (wordleRes.finished) {
-					writeDailyDoneHint(dailyScopeHintKey, true);
-					loadLeaderboard();
+					if (!dailyIsArchive) {
+						writeDailyDoneHint(dailyScopeHintKey, true);
+					}
+					loadLeaderboard(selectedDailyDate);
 				}
+				loadArchive();
 
 				const a = wordleRes.attempt;
 				srAnnouncement = wordleRes.won
@@ -817,7 +918,7 @@
 	onMount(() => {
 		loadAutocompleteTitles();
 		loadAuthSession();
-		loadLeaderboard();
+		loadArchive();
 
 		try {
 			const savedPoolSize = Number(localStorage.getItem(STORAGE_GLOBAL_POOL_SIZE_KEY) || '1000');
@@ -844,6 +945,7 @@
 		const urlParams = new URLSearchParams(window.location.search);
 		const urlUser = urlParams.get('user')?.trim();
 		const urlMode = urlParams.get('mode');
+		const urlDate = urlParams.get('date')?.trim();
 		const loggedInFlag = urlParams.get('logged_in');
 		const authErrorFlag = urlParams.get('auth_error');
 
@@ -864,9 +966,19 @@
 			window.history.replaceState({}, '', cleanUrl);
 		}
 
-		if (urlMode === 'unlimited' || urlMode === 'daily' || urlMode === 'classic') {
+		if (urlDate && isValidDailyArchiveDate(urlDate)) {
+			selectedDailyDate = urlDate;
+			mode = 'daily';
+			activeTab = 'daily';
+		} else if (urlMode === 'archive') {
+			activeTab = 'archive';
+			mode = 'daily';
+		} else if (urlMode === 'unlimited' || urlMode === 'daily' || urlMode === 'classic') {
 			mode = urlMode;
+			activeTab = urlMode;
 		}
+
+		loadLeaderboard(selectedDailyDate);
 
 		if (urlUser) {
 			loadProfile(urlUser, ['COMPLETED', 'CURRENT'], false, true, true, globalPoolSize);
@@ -906,15 +1018,15 @@
 	<div class="sr-only" aria-live="polite" aria-atomic="true">{srAnnouncement}</div>
 
 	<AppHeader
-		{mode}
+		{activeTab}
 		username={profile.username}
 		avatar={profile.avatar}
 		eligibleShows={profile.eligibleShows}
 		isGlobalPool={profile.isGlobalPool}
 		{authUser}
 		{authConfigured}
-		dailyUnplayed={!dailyFinished && !dailyCompletedHint}
-		onModeChange={switchMode}
+		dailyUnplayed={!dailyCompletedHint}
+		onTabChange={switchTab}
 		onOpenSetup={() => {
 			setupError = null;
 			setupOpen = true;
@@ -977,29 +1089,41 @@
 		</div>
 	{/if}
 
-	<SessionBar
-		{mode}
-		{classicRoundIndex}
-		{classicHistory}
-		{classicScore}
-		{unlimitedCount}
-		{unlimitedScore}
-		{unlimitedLives}
-		unlimitedMaxLives={UNLIMITED_MAX_LIVES}
-		streak={activeStreak}
-		{bestStreak}
-		dailyPuzzleNumber={currentRound?.dailyMeta?.puzzleNumber}
-		dailyScopeLabel={currentRound?.dailyMeta?.scopeLabel}
-		dailyAttemptsCount={dailyAttempts.length}
-		{dailyAnimeHitAttempt}
-		dailyGaveUp={dailyAttempts.some((a) => a.gaveUp)}
-		{dailyWon}
-		{dailyFinished}
-	/>
+	{#if activeTab !== 'archive'}
+		<SessionBar
+			{mode}
+			{classicRoundIndex}
+			{classicHistory}
+			{classicScore}
+			{unlimitedCount}
+			{unlimitedScore}
+			{unlimitedLives}
+			unlimitedMaxLives={UNLIMITED_MAX_LIVES}
+			streak={activeStreak}
+			{bestStreak}
+			dailyPuzzleNumber={currentRound?.dailyMeta?.puzzleNumber}
+			dailyScopeLabel={currentRound?.dailyMeta?.scopeLabel}
+			dailyDate={currentRound?.dailyMeta?.date ?? selectedDailyDate}
+			{dailyIsArchive}
+			{canGoPrevDay}
+			{canGoNextDay}
+			dailyAttemptsCount={dailyAttempts.length}
+			{dailyAnimeHitAttempt}
+			dailyGaveUp={dailyAttempts.some((a) => a.gaveUp)}
+			{dailyWon}
+			{dailyFinished}
+			onPrevDay={goPrevDay}
+			onNextDay={goNextDay}
+			onGoToday={goToday}
+			onOpenArchive={() => switchTab('archive')}
+		/>
+	{/if}
 
 	<main class="stage">
 		<h1 class="sr-only">
-			{#if mode === 'classic'}
+			{#if activeTab === 'archive'}
+				Daily Frame Archive
+			{:else if mode === 'classic'}
 				Classic game, round {Math.min(classicRoundIndex + 1, CLASSIC_ROUNDS)} of {CLASSIC_ROUNDS}
 			{:else if mode === 'unlimited'}
 				Unlimited mode, frame {unlimitedCount + 1}
@@ -1030,7 +1154,16 @@
 			</div>
 		{/if}
 
-		{#if mode === 'classic' && classicFinished}
+		{#if activeTab === 'archive'}
+			<div class="shell">
+				<DailyArchive
+					{archive}
+					loading={archiveLoading}
+					selectedDate={selectedDailyDate}
+					onSelectDate={openDailyDate}
+				/>
+			</div>
+		{:else if mode === 'classic' && classicFinished}
 			<div class="shell">
 				<ClassicSummary
 					username={profile.username}
@@ -1086,6 +1219,9 @@
 									puzzleNumber={currentRound.dailyMeta.puzzleNumber}
 									puzzleDate={currentRound.dailyMeta.date}
 									scopeLabel={currentRound.dailyMeta.scopeLabel}
+									isArchive={dailyIsArchive}
+									{canGoPrevDay}
+									{canGoNextDay}
 									attempts={dailyAttempts}
 									finished={dailyFinished}
 									won={dailyWon}
@@ -1094,6 +1230,10 @@
 									lockedYear={dailyMatchedAttempt?.guessedYear ?? null}
 									liveEpisode={dailyLiveEpisode}
 									hintText={dailyEpisodeBounds.hint}
+									onPrevDay={goPrevDay}
+									onNextDay={goNextDay}
+									onGoToday={goToday}
+									onOpenArchive={() => switchTab('archive')}
 									onSwitchClassic={() => switchMode('classic')}
 									onSwitchUnlimited={() => switchMode('unlimited')}
 								/>
@@ -1177,7 +1317,9 @@
 						{dailyFinished}
 						{dailyWon}
 						dailyAttemptsCount={dailyAttempts.length}
-						onRefresh={loadLeaderboard}
+						puzzleDate={currentRound?.dailyMeta?.date ?? selectedDailyDate}
+						isArchive={dailyIsArchive}
+						onRefresh={() => loadLeaderboard(selectedDailyDate)}
 					/>
 				</div>
 			{/if}

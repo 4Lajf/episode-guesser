@@ -15,11 +15,19 @@
 		bestStreak: number;
 		dailyPuzzleNumber?: number;
 		dailyScopeLabel?: string;
+		dailyDate?: string;
+		dailyIsArchive?: boolean;
+		canGoPrevDay?: boolean;
+		canGoNextDay?: boolean;
 		dailyAttemptsCount: number;
 		dailyAnimeHitAttempt?: number | null;
 		dailyGaveUp?: boolean;
 		dailyWon: boolean;
 		dailyFinished: boolean;
+		onPrevDay?: () => void;
+		onNextDay?: () => void;
+		onGoToday?: () => void;
+		onOpenArchive?: () => void;
 	}
 
 	let {
@@ -35,12 +43,32 @@
 		bestStreak,
 		dailyPuzzleNumber,
 		dailyScopeLabel,
+		dailyDate = '',
+		dailyIsArchive = false,
+		canGoPrevDay = false,
+		canGoNextDay = false,
 		dailyAttemptsCount,
 		dailyAnimeHitAttempt = null,
 		dailyGaveUp = false,
 		dailyWon,
-		dailyFinished
+		dailyFinished,
+		onPrevDay,
+		onNextDay,
+		onGoToday,
+		onOpenArchive
 	}: Props = $props();
+
+	function formatShortDate(iso: string): string {
+		if (!iso) return '';
+		const d = new Date(`${iso}T00:00:00Z`);
+		if (Number.isNaN(d.getTime())) return iso;
+		return d.toLocaleDateString('en-GB', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric',
+			timeZone: 'UTC'
+		});
+	}
 </script>
 
 <section class="session" aria-label="Current game">
@@ -134,10 +162,47 @@
 				<span class="rounds-label">
 					Daily frame <b class="tnum">#{dailyPuzzleNumber ?? '—'}</b>
 				</span>
-				<span class="ranked-pill">Ranked</span>
-				{#if dailyScopeLabel}
+				<span class="ranked-pill" class:archive-pill={dailyIsArchive}>
+					{dailyIsArchive ? 'Archive' : 'Ranked'}
+				</span>
+				{#if dailyIsArchive && dailyDate}
+					<span class="sub-note">{formatShortDate(dailyDate)}</span>
+				{:else if dailyScopeLabel}
 					<span class="sub-note">{dailyScopeLabel}</span>
 				{/if}
+
+				<div class="day-nav" aria-label="Navigate Daily archive">
+					{#if onPrevDay}
+						<button
+							type="button"
+							class="nav-mini"
+							disabled={!canGoPrevDay}
+							onclick={onPrevDay}
+							aria-label="Previous day’s Daily frame"
+							title="Previous day"
+						>
+							←
+						</button>
+					{/if}
+					{#if onNextDay}
+						<button
+							type="button"
+							class="nav-mini"
+							disabled={!canGoNextDay}
+							onclick={onNextDay}
+							aria-label="Next day’s Daily frame"
+							title="Next day"
+						>
+							→
+						</button>
+					{/if}
+					{#if dailyIsArchive && onGoToday}
+						<button type="button" class="nav-link" onclick={onGoToday}>Today</button>
+					{/if}
+					{#if onOpenArchive}
+						<button type="button" class="nav-link" onclick={onOpenArchive}>Archive</button>
+					{/if}
+				</div>
 			</div>
 
 			<div class="daily-status">
@@ -204,6 +269,57 @@
 		font-size: 12px;
 		font-weight: 700;
 		letter-spacing: 0.01em;
+	}
+
+	.ranked-pill.archive-pill {
+		background: var(--yellow-soft);
+		color: var(--yellow);
+	}
+
+	.day-nav {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.nav-mini {
+		width: 26px;
+		height: 26px;
+		display: grid;
+		place-items: center;
+		border: 1px solid var(--line);
+		border-radius: var(--r-sm);
+		background: none;
+		color: var(--paper);
+		font-size: 13px;
+		font-weight: 700;
+		transition: background-color 120ms ease, border-color 120ms ease;
+	}
+
+	.nav-mini:hover:not(:disabled) {
+		background: var(--ink-raised);
+		border-color: var(--line-strong);
+	}
+
+	.nav-mini:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+
+	.nav-link {
+		height: 26px;
+		padding: 0 8px;
+		border: 0;
+		border-radius: var(--r-sm);
+		background: none;
+		color: var(--blue);
+		font-size: 13px;
+		font-weight: 650;
+		transition: background-color 120ms ease;
+	}
+
+	.nav-link:hover {
+		background: var(--ink-raised);
 	}
 
 	.lives {

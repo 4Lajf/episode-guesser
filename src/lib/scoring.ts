@@ -14,7 +14,8 @@ export const UNLIMITED_MAX_LIVES = 3;
 export const CURATED_POOL_SIZE = 1000;
 export const CURATED_COMPACT_POOL_SIZE = 249;
 
-const DAILY_EPOCH_MS = Date.UTC(2026, 0, 1);
+export const DAILY_EPOCH_DATE = '2025-11-27';
+const DAILY_EPOCH_MS = Date.UTC(2025, 10, 27);
 
 /**
  * Normalizes an anime title for fair comparison across AniList, AnisongDB, and ani.zip.
@@ -286,6 +287,35 @@ export function getDailyPuzzleNumber(dateStr: string): number {
 	const [y, m, d] = dateStr.split('-').map(Number);
 	const ts = Date.UTC(y, (m || 1) - 1, d || 1);
 	return Math.max(1, Math.floor((ts - DAILY_EPOCH_MS) / 86_400_000) + 1);
+}
+
+export function isValidDailyArchiveDate(
+	dateStr: string,
+	todayUtc: string = getTodayUtcDate()
+): boolean {
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+	const parsed = new Date(`${dateStr}T00:00:00Z`);
+	if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== dateStr) {
+		return false;
+	}
+	return dateStr >= DAILY_EPOCH_DATE && dateStr <= todayUtc;
+}
+
+export function shiftUtcDate(dateStr: string, deltaDays: number): string {
+	const d = new Date(`${dateStr}T00:00:00Z`);
+	d.setUTCDate(d.getUTCDate() + deltaDays);
+	return d.toISOString().slice(0, 10);
+}
+
+export function listDailyDatesDescending(todayUtc: string = getTodayUtcDate()): string[] {
+	const dates: string[] = [];
+	const cur = new Date(`${todayUtc}T00:00:00Z`);
+	const start = new Date(`${DAILY_EPOCH_DATE}T00:00:00Z`);
+	while (cur >= start) {
+		dates.push(cur.toISOString().slice(0, 10));
+		cur.setUTCDate(cur.getUTCDate() - 1);
+	}
+	return dates;
 }
 
 export function buildWordleShareText(params: {

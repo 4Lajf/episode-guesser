@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { WORDLE_ZOOM_STEPS } from '$lib/scoring';
 import type { AnimePoolItem, EpisodeReveal, GameMode } from '$lib/types';
 import { fetchAniZipEpisodes, filterWatchedEpisodes } from './anizip';
+import { getBakedDailyPick } from './dailyArchive';
 import { sealPayload } from './token';
 
 export interface CropSpec {
@@ -250,8 +251,15 @@ export async function pickRoundFromPool(params: {
 		throw new Error('No eligible anime found in this list. Try including more list statuses.');
 	}
 
-	// Reuse the persisted Daily pick for (date, scopeKey) so restarts never shift today's Global Daily
+	// Serve pre-generated 1-year archive picks instantaneously (0ms, zero upstream flakiness),
+	// or reuse the persisted Daily pick for future dates so restarts never shift a day's Global Daily.
 	if (mode === 'daily' && dailyBinding) {
+		if (dailyBinding.scopeKey === 'global') {
+			const baked = getBakedDailyPick(dailyBinding.dailyDate);
+			if (baked) {
+				return sealDailyFromCachedPick({ ...baked, cachedAt: Date.now() }, dailyBinding);
+			}
+		}
 		hydrateDailyPicks();
 		const dailyKey = `${dailyBinding.dailyDate}|${dailyBinding.scopeKey}`;
 		const cachedPick = resolvedDailyPickCache.get(dailyKey);

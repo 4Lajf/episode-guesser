@@ -6,16 +6,21 @@ import {
 	buildWordleShareText,
 	CURATED_COMPACT_POOL_SIZE,
 	CURATED_POOL_SIZE,
+	DAILY_EPOCH_DATE,
 	evaluateClassicGuess,
 	evaluateWordleAttempt,
 	getDailyPuzzleNumber,
+	isValidDailyArchiveDate,
+	listDailyDatesDescending,
 	matchAnimeTitle,
 	normalizeTitle,
 	scoreEpisodeProximity,
+	shiftUtcDate,
 	UNLIMITED_MAX_LIVES,
 	WORDLE_ZOOM_STEPS
 } from '../src/lib/scoring';
 import { filterWatchedEpisodes } from '../src/lib/server/anizip';
+import { getBakedArchiveCount, getBakedDailyPick } from '../src/lib/server/dailyArchive';
 import { isAllowedImageUrl } from '../src/lib/server/imageHost';
 import {
 	clearLeaderboardStoreForTests,
@@ -402,6 +407,28 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 		expect(board.me?.rank).toBe(2);
 		expect(board.entries[2].attemptsUsed).toBe(2);
 		clearLeaderboardStoreForTests();
+	});
+
+	it('provides 366 unique baked Daily Archive puzzles covering 1 year in the past and rejects future dates', () => {
+		expect(getBakedArchiveCount()).toBe(366);
+		expect(getDailyPuzzleNumber(DAILY_EPOCH_DATE)).toBe(1);
+		expect(getDailyPuzzleNumber('2026-11-27')).toBe(366);
+		expect(shiftUtcDate('2026-11-27', -1)).toBe('2026-11-26');
+		expect(isValidDailyArchiveDate('2025-11-27', '2026-11-27')).toBe(true);
+		expect(isValidDailyArchiveDate('2026-06-15', '2026-11-27')).toBe(true);
+		expect(isValidDailyArchiveDate('2025-11-26', '2026-11-27')).toBe(false);
+		expect(isValidDailyArchiveDate('2026-11-28', '2026-11-27')).toBe(false);
+
+		const dates = listDailyDatesDescending('2026-11-27');
+		expect(dates.length).toBe(366);
+		const seenAnimeIds = new Set<number>();
+		for (const d of dates) {
+			const pick = getBakedDailyPick(d);
+			expect(pick).not.toBeNull();
+			expect(isAllowedImageUrl(pick!.rawImageUrl)).toBe(true);
+			expect(seenAnimeIds.has(pick!.reveal.anilistId)).toBe(false);
+			seenAnimeIds.add(pick!.reveal.anilistId);
+		}
 	});
 
 	it('restricts image proxy hosts and protocols strictly', () => {
