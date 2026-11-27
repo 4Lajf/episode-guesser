@@ -17,6 +17,9 @@
 		dailyGaveUp?: boolean;
 		dailyWon: boolean;
 		dailyFinished: boolean;
+		canSwitchDailyScope?: boolean;
+		isGlobalDaily?: boolean;
+		onToggleDailyScope?: () => void;
 	}
 
 	let {
@@ -33,198 +36,284 @@
 		dailyAttemptsCount,
 		dailyGaveUp = false,
 		dailyWon,
-		dailyFinished
+		dailyFinished,
+		canSwitchDailyScope = false,
+		isGlobalDaily = false,
+		onToggleDailyScope
 	}: Props = $props();
-
-	function pipState(i: number): 'hit' | 'mid' | 'miss' | 'current' | 'empty' {
-		const done = classicHistory[i];
-		if (done) {
-			if (done.result.totalPoints >= 800) return 'hit';
-			if (done.result.totalPoints >= 450) return 'mid';
-			return 'miss';
-		}
-		if (i === classicRoundIndex) return 'current';
-		return 'empty';
-	}
 </script>
 
-<div class="session-bar">
-	{#if mode === 'classic'}
-		<div class="session-left">
-			<div class="pips" aria-label="Round progress">
-				{#each Array.from({ length: CLASSIC_ROUNDS }) as _, idx (idx)}
-					<span class="pip {pipState(idx)}"></span>
-				{/each}
-			</div>
-			<span class="session-title">
-				Round <strong class="font-display num-inline">{Math.min(classicRoundIndex + 1, CLASSIC_ROUNDS)}</strong> of {CLASSIC_ROUNDS}
-			</span>
-		</div>
-
-		<div class="session-metrics">
-			<div class="metric">
-				<span class="metric-label">Score</span>
-				<span class="metric-val font-display accent">{classicScore.toLocaleString('en-US')}</span>
-			</div>
-			<div class="metric">
-				<span class="metric-label">Streak</span>
-				<span class="metric-val font-display">{streak}</span>
-			</div>
-		</div>
-	{:else if mode === 'unlimited'}
-		<div class="session-left">
-			<span class="session-title">
-				Frame <strong class="font-display num-inline">#{unlimitedCount + 1}</strong>
-			</span>
-			<span class="session-muted">Endless run</span>
-		</div>
-
-		<div class="session-metrics">
-			<div class="metric">
-				<span class="metric-label">Score</span>
-				<span class="metric-val font-display accent">{unlimitedScore.toLocaleString('en-US')}</span>
-			</div>
-			<div class="metric">
-				<span class="metric-label">Streak</span>
-				<span class="metric-val font-display">{streak}</span>
-			</div>
-			<div class="metric">
-				<span class="metric-label">Best</span>
-				<span class="metric-val font-display">{bestStreak}</span>
-			</div>
-		</div>
-	{:else}
-		<div class="session-left">
-			<span class="session-title">
-				Daily <strong class="font-display num-inline">#{dailyPuzzleNumber ?? '—'}</strong>
-			</span>
-			{#if dailyScopeLabel}
-				<span class="session-muted">{dailyScopeLabel}</span>
-			{/if}
-		</div>
-
-		<div class="session-metrics">
-			<div class="metric">
-				<span class="metric-label">Status</span>
-				<span class="metric-val font-display" class:hit={dailyWon}>
-					{#if dailyFinished}
-						{dailyWon
-							? `Solved in ${dailyAttemptsCount}/${WORDLE_MAX_ATTEMPTS}`
-							: dailyGaveUp
-								? 'Gave up'
-								: `Missed (${WORDLE_MAX_ATTEMPTS}/${WORDLE_MAX_ATTEMPTS})`}
-					{:else}
-						Attempt {Math.min(dailyAttemptsCount + 1, WORDLE_MAX_ATTEMPTS)} of {WORDLE_MAX_ATTEMPTS}
-					{/if}
+<section class="session" aria-label="Current game">
+	<div class="shell cols session-cols">
+		{#if mode === 'classic'}
+			<div class="rounds">
+				<span class="rounds-label">
+					Round <b class="tnum">{Math.min(classicRoundIndex + 1, CLASSIC_ROUNDS)}</b> of {CLASSIC_ROUNDS}
 				</span>
+
+				<ol class="pips" aria-label="Round scores">
+					{#each Array.from({ length: CLASSIC_ROUNDS }) as _, idx (idx)}
+						{@const done = classicHistory[idx]}
+						{#if done}
+							{@const pts = done.result.totalPoints}
+							<li class="done" class:good={pts >= 800} class:zero={pts === 0}>
+								<span class="sr-only">Round {idx + 1} scored {pts} points</span>
+								<span class="v tnum" aria-hidden="true">{pts === 0 ? '✗' : pts}</span>
+							</li>
+						{:else if idx === classicRoundIndex}
+							<li class="now" aria-current="step">
+								<span class="sr-only">Round {idx + 1}, in play</span>
+								<span class="v tnum" aria-hidden="true">{idx + 1}</span>
+							</li>
+						{:else}
+							<li>
+								<span class="sr-only">Round {idx + 1}, upcoming</span>
+								<span class="v tnum" aria-hidden="true">{idx + 1}</span>
+							</li>
+						{/if}
+					{/each}
+				</ol>
 			</div>
-		</div>
-	{/if}
-</div>
+
+			<dl class="tally">
+				<div>
+					<dt>Score</dt>
+					<dd class="tnum">{classicScore.toLocaleString('en-US')}</dd>
+				</div>
+				<div>
+					<dt>Streak</dt>
+					<dd class="tnum">{streak}</dd>
+				</div>
+			</dl>
+		{:else if mode === 'unlimited'}
+			<div class="rounds">
+				<span class="rounds-label">
+					Frame <b class="tnum">#{unlimitedCount + 1}</b>
+				</span>
+				<span class="sub-note">Endless run</span>
+			</div>
+
+			<dl class="tally">
+				<div>
+					<dt>Score</dt>
+					<dd class="tnum">{unlimitedScore.toLocaleString('en-US')}</dd>
+				</div>
+				<div>
+					<dt>Streak</dt>
+					<dd class="tnum">{streak}</dd>
+				</div>
+				<div>
+					<dt>Best</dt>
+					<dd class="tnum">{bestStreak}</dd>
+				</div>
+			</dl>
+		{:else}
+			<div class="rounds daily-bar-left">
+				<span class="rounds-label">
+					Daily frame <b class="tnum">#{dailyPuzzleNumber ?? '—'}</b>
+				</span>
+				{#if dailyScopeLabel}
+					<span class="sub-note">{dailyScopeLabel}</span>
+				{/if}
+				{#if canSwitchDailyScope && onToggleDailyScope}
+					<button type="button" class="scope-link" onclick={onToggleDailyScope}>
+						Switch to {isGlobalDaily ? 'your AniList daily' : 'Global Daily'}
+					</button>
+				{/if}
+			</div>
+
+			<div class="daily-status">
+				{#if dailyFinished}
+					<span class="status-text" class:won={dailyWon}>
+						{#if dailyWon}
+							Solved in <b class="tnum">{dailyAttemptsCount}</b> of {WORDLE_MAX_ATTEMPTS}
+						{:else if dailyGaveUp}
+							Gave up
+						{:else}
+							Missed ({WORDLE_MAX_ATTEMPTS}/{WORDLE_MAX_ATTEMPTS})
+						{/if}
+					</span>
+				{:else}
+					<span class="status-text">
+						Attempt <b class="tnum">{Math.min(dailyAttemptsCount + 1, WORDLE_MAX_ATTEMPTS)}</b> of {WORDLE_MAX_ATTEMPTS}
+					</span>
+				{/if}
+			</div>
+		{/if}
+	</div>
+</section>
 
 <style>
-	.session-bar {
+	.session-cols {
+		min-height: 54px;
+		padding-block: 10px;
+		align-items: center;
+		row-gap: 10px;
+	}
+
+	.rounds {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
 		gap: 14px;
 		flex-wrap: wrap;
 	}
 
-	.session-left {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		flex-wrap: wrap;
+	.rounds-label {
+		color: var(--text-2);
+		font-size: 15px;
+	}
+
+	.rounds-label b {
+		color: var(--paper);
+		font-weight: 700;
+	}
+
+	.sub-note {
+		font-size: 14px;
+		color: var(--text-3);
+	}
+
+	.scope-link {
+		border: 0;
+		background: none;
+		padding: 2px 6px;
+		border-radius: var(--r-sm);
+		color: var(--blue);
+		font-size: 13.5px;
+		font-weight: 600;
+		transition: background-color 120ms ease;
+	}
+
+	.scope-link:hover {
+		background: var(--ink-raised);
+		text-decoration: underline;
 	}
 
 	.pips {
 		display: flex;
-		align-items: center;
-		gap: 6px;
+		gap: 5px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
 	}
 
-	.pip {
-		width: 24px;
-		height: 5px;
-		border-radius: 999px;
-		background: var(--ink-2);
-		border: 1px solid var(--rule);
-		transition: background 180ms ease;
+	.pips li {
+		width: 64px;
+		height: 26px;
+		border-radius: var(--r-sm);
+		display: grid;
+		place-items: center;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-3);
+		box-shadow: inset 0 0 0 1px var(--line);
 	}
 
-	.pip.hit {
-		background: var(--hit);
-		border-color: var(--hit);
+	.pips .done {
+		background: var(--ink-raised);
+		color: var(--text-2);
+		box-shadow: none;
 	}
 
-	.pip.mid {
-		background: var(--lamp);
-		border-color: var(--lamp);
+	.pips .done.good {
+		color: var(--green);
 	}
 
-	.pip.miss {
-		background: var(--danger);
-		border-color: var(--danger);
+	.pips .done.zero {
+		color: var(--text-3);
 	}
 
-	.pip.current {
-		background: var(--text);
-		border-color: var(--text);
+	.pips .now {
+		color: var(--paper);
+		box-shadow: inset 0 0 0 1.5px var(--paper);
 	}
 
-	.session-title {
-		font-size: 14px;
+	.tally {
+		display: flex;
+		gap: 28px;
+		margin: 0;
+	}
+
+	.tally div {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+	}
+
+	.tally dt {
+		color: var(--text-2);
+		font-size: 14.5px;
+	}
+
+	.tally dd {
+		margin: 0;
+		font-size: 21px;
+		font-weight: 750;
+		color: var(--paper);
+	}
+
+	.daily-status {
+		display: flex;
+		align-items: baseline;
+	}
+
+	.status-text {
+		font-size: 15px;
 		color: var(--text-2);
 	}
 
-	.num-inline {
-		font-size: 16px;
-		color: var(--text);
-	}
-
-	.session-muted {
-		font-size: 13px;
-		color: var(--text-3);
-	}
-
-	.session-metrics {
-		display: flex;
-		align-items: center;
-		gap: 20px;
-	}
-
-	.metric {
-		display: inline-flex;
-		align-items: baseline;
-		gap: 7px;
-	}
-
-	.metric-label {
-		font-size: 13px;
-		color: var(--text-3);
-	}
-
-	.metric-val {
-		font-size: 19px;
+	.status-text b {
+		color: var(--paper);
 		font-weight: 700;
-		color: var(--text);
 	}
 
-	.metric-val.accent {
-		color: var(--lamp);
+	.status-text.won {
+		color: var(--green);
 	}
 
-	.metric-val.hit {
-		color: var(--hit);
+	.status-text.won b {
+		color: var(--green);
 	}
 
-	@media (max-width: 540px) {
-		.session-metrics {
-			gap: 14px;
+	@media (max-width: 960px) {
+		.session-cols {
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: end;
+			column-gap: 12px;
+			padding-block: 10px 8px;
 		}
-		.metric-val {
-			font-size: 17px;
+
+		.rounds:not(.daily-bar-left) {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 7px;
+		}
+
+		.pips li {
+			width: 22px;
+			height: 6px;
+			border-radius: 3px;
+		}
+
+		.pips .v {
+			display: none;
+		}
+
+		.pips .done.good {
+			background: var(--green);
+		}
+
+		.pips .now {
+			background: var(--paper);
+			box-shadow: none;
+		}
+
+		.tally {
+			gap: 18px;
+		}
+
+		.tally dd {
+			font-size: 19px;
 		}
 	}
 </style>

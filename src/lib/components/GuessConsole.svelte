@@ -6,14 +6,17 @@
 		titles: string[];
 		submitting: boolean;
 		disabled?: boolean;
-		compact?: boolean;
 		skipLabel?: string;
 		confirmSkip?: boolean;
 		submitLabel?: string;
-		episodeHint?: string;
-		prefillTitle?: string;
+		scoringNote?: string;
+		lockedAnimeTitle?: string;
+		minEpisode?: number;
+		maxEpisode?: number | null;
+		initialEpisode?: number;
 		inlineError?: string | null;
 		roundKey: string;
+		onEpisodeChange?: (ep: number) => void;
 		onSubmit: (title: string, episode: number) => void;
 		onSkip: () => void;
 	}
@@ -22,14 +25,17 @@
 		titles,
 		submitting,
 		disabled = false,
-		compact = false,
 		skipLabel = 'Skip frame',
 		confirmSkip = false,
 		submitLabel = 'Lock in guess',
-		episodeHint = 'Near misses still score',
-		prefillTitle = '',
+		scoringNote = '',
+		lockedAnimeTitle = '',
+		minEpisode = 1,
+		maxEpisode = null,
+		initialEpisode = 1,
 		inlineError = null,
 		roundKey,
+		onEpisodeChange,
 		onSubmit,
 		onSkip
 	}: Props = $props();
@@ -44,7 +50,8 @@
 	let titleInputEl = $state<HTMLInputElement | null>(null);
 	let episodeInputEl = $state<HTMLInputElement | null>(null);
 
-	// Precompute normalized titles once whenever title pool changes
+	const isLockedAnime = $derived(Boolean(lockedAnimeTitle));
+
 	const indexedTitles = $derived(
 		titles.map((raw) => ({
 			raw,
@@ -52,6 +59,14 @@
 			norm: normalizeTitle(raw)
 		}))
 	);
+
+	function clampEpisode(v: number): number {
+		const lo = Math.max(1, minEpisode);
+		let next = Number.isFinite(v) ? Math.round(v) : lo;
+		if (next < lo) next = lo;
+		if (maxEpisode !== null && next > maxEpisode) next = maxEpisode;
+		return next;
+	}
 
 	function resetSkipArm() {
 		armedSkip = false;
@@ -78,19 +93,21 @@
 		onSkip();
 	}
 
-	// Reset inputs cleanly whenever a new round/attempt starts
+	// Reset cleanly on each round or Daily attempt
 	$effect(() => {
 		void roundKey;
-		titleQuery = prefillTitle || '';
-		episodeText = '1';
+		titleQuery = lockedAnimeTitle || '';
+		const startEp = clampEpisode(initialEpisode);
+		episodeText = String(startEp);
+		onEpisodeChange?.(startEp);
 		dropdownOpen = false;
 		activeIndex = 0;
 		resetSkipArm();
 
-		if (typeof window !== 'undefined' && window.innerWidth > 760) {
+		if (typeof window !== 'undefined' && window.innerWidth > 960) {
 			tick().then(() => {
 				if (disabled) return;
-				if (prefillTitle) {
+				if (lockedAnimeTitle) {
 					episodeInputEl?.focus();
 					episodeInputEl?.select();
 				} else {
@@ -100,10 +117,10 @@
 		}
 	});
 
-	const filteredTitles = $derived.by(() => {
+	const searchResult = $derived.by(() => {
 		const rawQ = titleQuery.trim().toLowerCase();
 		const normQ = normalizeTitle(titleQuery);
-		if (!rawQ && !normQ) return [];
+		if (!rawQ && !normQ) return { items: [] as string[], total: 0 };
 
 		const exactOrPrefix: string[] = [];
 		const wordStarts: string[] = [];
@@ -131,12 +148,15 @@
 			}
 		}
 
-		// Shorter prefix matches surface first so exact shows rank above long OVAs
 		exactOrPrefix.sort((a, b) => a.length - b.length);
 		wordStarts.sort((a, b) => a.length - b.length);
 
-		return [...exactOrPrefix, ...wordStarts, ...contains].slice(0, 10);
+		const all = [...exactOrPrefix, ...wordStarts, ...contains];
+		return { items: all.slice(0, 10), total: all.length };
 	});
+
+	const filteredTitles = $derived(searchResult.items);
+	const totalMatches = $derived(searchResult.total);
 
 	$effect(() => {
 		if (activeIndex >= filteredTitles.length) {
@@ -173,12 +193,13 @@
 
 	function parsedEpisode(): number {
 		const n = parseInt(episodeText.replace(/[^0-9]/g, ''), 10);
-		return Number.isFinite(n) && n >= 1 ? n : 1;
+		return clampEpisode(Number.isFinite(n) ? n : minEpisode);
 	}
 
 	function nudgeEpisode(delta: number) {
-		const next = Math.max(1, parsedEpisode() + delta);
+		const next = clampEpisode(parsedEpisode() + delta);
 		episodeText = String(next);
+		onEpisodeChange?.(next);
 	}
 
 	function handleTitleKeydown(e: KeyboardEvent) {
@@ -223,194 +244,288 @@
 
 	function handleFormSubmit() {
 		if (disabled || submitting) return;
-		const cleanTitle = titleQuery.trim();
+		const cleanTitle = (isLockedAnime ? lockedAnimeTitle : titleQuery).trim();
 		if (!cleanTitle) {
 			titleInputEl?.focus();
 			return;
 		}
 		dropdownOpen = false;
-		onSubmit(cleanTitle, parsedEpisode());
+		const ep = parsedEpisode();
+		episodeText = String(ep);
+		onEpisodeChange?.(ep);
+		onSubmit(cleanTitle, ep);
 	}
+
+	const canDecrement = $derived(parsedEpisode() > Math.max(1, minEpisode));
+	const canIncrement = $derived(maxEpisode === null || parsedEpisode() < maxEpisode);
+	const epInputWidthCh = $derived(Math.max(1.8, (episodeText.length || 1) * 1.05 + 0.6));
 </script>
 
 <form
-	class="guess-console"
-	class:compact
+	class="rail"
+	autocomplete="off"
 	onsubmit={(e) => {
 		e.preventDefault();
 		handleFormSubmit();
 	}}
 >
-	<!-- Anime Title WAI-ARIA Combobox (dropdown anchored to .title-field so upward never clips label!) -->
-	<div class="field title-field">
-		<div class="field-head">
-			<label for="anime-combobox" class="field-label">Anime title</label>
-			<span class="field-hint desktop-only">↑↓ to pick, Enter to choose</span>
-		</div>
-
-		<div class="combobox-wrap">
-			<svg class="search-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-				<circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.8" />
-				<path d="M13.5 13.5L17.5 17.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-			</svg>
-
-			<input
-				bind:this={titleInputEl}
-				id="anime-combobox"
-				type="text"
-				class="title-input"
-				role="combobox"
-				aria-autocomplete="list"
-				aria-expanded={dropdownOpen && filteredTitles.length > 0}
-				aria-controls={dropdownOpen && filteredTitles.length > 0
-					? 'anime-title-listbox'
-					: undefined}
-				aria-activedescendant={dropdownOpen && filteredTitles.length > 0
-					? `anime-opt-${activeIndex}`
-					: undefined}
-				autocomplete="off"
-				spellcheck="false"
-				placeholder="Search anime title..."
-				disabled={disabled || submitting}
-				bind:value={titleQuery}
-				onfocus={() => {
-					if (titleQuery.trim()) dropdownOpen = true;
-				}}
-				oninput={() => {
-					dropdownOpen = titleQuery.trim().length > 0;
-					activeIndex = 0;
-				}}
-				onblur={() => {
-					setTimeout(() => (dropdownOpen = false), 140);
-				}}
-				onkeydown={handleTitleKeydown}
-			/>
-
-			{#if titleQuery}
+	{#if isLockedAnime}
+		<!-- Daily found-anime compact console: episode stepper + primary submit side by side -->
+		<div class="daily-console">
+			<div class="stepper compact-stepper">
 				<button
 					type="button"
-					class="clear-btn"
-					aria-label="Clear anime title"
-					disabled={disabled || submitting}
-					onclick={() => {
-						titleQuery = '';
-						dropdownOpen = false;
-						titleInputEl?.focus();
-					}}
+					class="step-btn"
+					aria-label="One episode earlier"
+					disabled={disabled || submitting || !canDecrement}
+					onclick={() => nudgeEpisode(-1)}
 				>
-					×
+					<svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10h11" /></svg>
 				</button>
-			{/if}
-		</div>
 
-		{#if dropdownOpen && filteredTitles.length > 0}
-			<div
-				id="anime-title-listbox"
-				class="dropdown"
-				role="listbox"
-				aria-label="Anime title suggestions"
-			>
-				{#each filteredTitles as item, idx (item)}
-					{@const [before, match, after] = splitHighlight(item, titleQuery)}
-					<button
-						type="button"
-						tabindex="-1"
-						id="anime-opt-{idx}"
-						role="option"
-						aria-selected={idx === activeIndex}
-						class="dropdown-opt"
-						class:active={idx === activeIndex}
-						onmousedown={(e) => e.preventDefault()}
-						onclick={() => selectTitle(item)}
-						onmouseenter={() => (activeIndex = idx)}
-					>
-						<span class="opt-text">
-							{before}<strong class="opt-match">{match}</strong>{after}
-						</span>
-					</button>
-				{/each}
+				<div class="ep-val">
+					<span aria-hidden="true">EP</span>
+					<input
+						bind:this={episodeInputEl}
+						id="episode-input"
+						type="text"
+						inputmode="numeric"
+						pattern="[0-9]*"
+						aria-label={maxEpisode !== null
+							? `Episode, between ${minEpisode} and ${maxEpisode}`
+							: `Episode, ${minEpisode} or later`}
+						disabled={disabled || submitting}
+						bind:value={episodeText}
+						style:width="{epInputWidthCh}ch"
+						oninput={() => {
+							episodeText = episodeText.replace(/[^0-9]/g, '').slice(0, 4);
+							const n = parseInt(episodeText, 10);
+							if (Number.isFinite(n) && n >= 1) onEpisodeChange?.(n);
+						}}
+						onblur={() => {
+							const ep = parsedEpisode();
+							episodeText = String(ep);
+							onEpisodeChange?.(ep);
+						}}
+						onkeydown={handleEpisodeKeydown}
+					/>
+				</div>
+
+				<button
+					type="button"
+					class="step-btn"
+					aria-label="One episode later"
+					disabled={disabled || submitting || !canIncrement}
+					onclick={() => nudgeEpisode(1)}
+				>
+					<svg class="icon" viewBox="0 0 20 20" aria-hidden="true">
+						<path d="M10 4.5v11M4.5 10h11" />
+					</svg>
+				</button>
 			</div>
-		{:else if dropdownOpen && titleQuery.trim().length >= 2 && filteredTitles.length === 0}
-			<div class="dropdown dropdown-empty" role="status">
-				No catalog match — press Enter to submit as typed
-			</div>
-		{/if}
-	</div>
 
-	<!-- Episode Stepper (never leaks target show's episode count) -->
-	<div class="field episode-field">
-		<div class="field-head">
-			<label for="episode-input" class="field-label">Episode</label>
-			<span class="field-hint">{episodeHint}</span>
-		</div>
-
-		<div class="stepper">
-			<button
-				type="button"
-				class="step-btn"
-				aria-label="Decrease episode number"
-				disabled={disabled || submitting || parsedEpisode() <= 1}
-				onclick={() => nudgeEpisode(-1)}
-			>
-				−
+			<button type="submit" class="primary" disabled={disabled || submitting}>
+				<span>{submitting ? 'Checking...' : submitLabel}</span>
+				{#if !submitting}
+					<kbd class="kbd-hint">Enter</kbd>
+				{/if}
 			</button>
+		</div>
 
-			<div class="ep-center">
-				<span class="ep-prefix font-display" aria-hidden="true">EP</span>
-				<input
-					bind:this={episodeInputEl}
-					id="episode-input"
-					type="text"
-					inputmode="numeric"
-					pattern="[0-9]*"
-					class="ep-input font-display"
-					disabled={disabled || submitting}
-					bind:value={episodeText}
-					oninput={() => {
-						episodeText = episodeText.replace(/[^0-9]/g, '').slice(0, 4);
-					}}
-					onblur={() => {
-						episodeText = String(parsedEpisode());
-					}}
-					onkeydown={handleEpisodeKeydown}
-				/>
-			</div>
-
+		<div class="locked-secondary">
 			<button
 				type="button"
-				class="step-btn"
-				aria-label="Increase episode number"
+				class="quiet small"
+				class:armed={armedSkip}
 				disabled={disabled || submitting}
-				onclick={() => nudgeEpisode(1)}
+				onclick={handleSkipClick}
 			>
-				+
+				{armedSkip ? 'Confirm give up?' : skipLabel}
 			</button>
 		</div>
-	</div>
+	{:else}
+		<!-- Full Anime Title Combobox (bounded popover inside 400px rail, never covers frame or bounces layout) -->
+		<div class="field title-field">
+			<label for="anime-combobox">Anime title</label>
 
-	<!-- Actions -->
-	<div class="actions">
-		<button
-			type="submit"
-			class="btn-submit"
-			disabled={disabled || submitting || !titleQuery.trim()}
-		>
-			<span>{submitting ? 'Checking...' : submitLabel}</span>
-			{#if !submitting}
-				<kbd class="kbd-hint">Enter</kbd>
-			{/if}
-		</button>
+			<div class="combo" class:open={dropdownOpen}>
+				<div class="combo-input">
+					<svg class="icon search-ico" viewBox="0 0 20 20" aria-hidden="true">
+						<circle cx="9" cy="9" r="5.5" />
+						<path d="M13.2 13.2 17 17" />
+					</svg>
 
-		<button
-			type="button"
-			class="btn-skip"
-			class:armed={armedSkip}
-			disabled={disabled || submitting}
-			onclick={handleSkipClick}
-		>
-			{armedSkip ? 'Confirm give up?' : skipLabel}
-		</button>
-	</div>
+					<input
+						bind:this={titleInputEl}
+						id="anime-combobox"
+						type="text"
+						role="combobox"
+						aria-autocomplete="list"
+						aria-expanded={dropdownOpen && filteredTitles.length > 0}
+						aria-controls={dropdownOpen && filteredTitles.length > 0
+							? 'anime-title-listbox'
+							: undefined}
+						aria-activedescendant={dropdownOpen && filteredTitles.length > 0
+							? `anime-opt-${activeIndex}`
+							: undefined}
+						spellcheck="false"
+						placeholder="Start typing a title"
+						disabled={disabled || submitting}
+						bind:value={titleQuery}
+						onfocus={() => {
+							if (titleQuery.trim()) dropdownOpen = true;
+						}}
+						oninput={() => {
+							dropdownOpen = titleQuery.trim().length > 0;
+							activeIndex = 0;
+						}}
+						onblur={() => {
+							setTimeout(() => (dropdownOpen = false), 140);
+						}}
+						onkeydown={handleTitleKeydown}
+					/>
+
+					{#if titleQuery}
+						<button
+							type="button"
+							class="clear"
+							aria-label="Clear title"
+							disabled={disabled || submitting}
+							onclick={() => {
+								titleQuery = '';
+								dropdownOpen = false;
+								titleInputEl?.focus();
+							}}
+						>
+							<svg class="icon" viewBox="0 0 20 20" aria-hidden="true">
+								<path d="M5 5l10 10M15 5 5 15" />
+							</svg>
+						</button>
+					{/if}
+				</div>
+
+				{#if dropdownOpen && filteredTitles.length > 0}
+					<div class="combo-panel">
+						<div
+							id="anime-title-listbox"
+							class="matches"
+							role="listbox"
+							aria-label="Matching titles"
+						>
+							{#each filteredTitles as item, idx (item)}
+								{@const [before, match, after] = splitHighlight(item, titleQuery)}
+								<button
+									type="button"
+									tabindex="-1"
+									id="anime-opt-{idx}"
+									role="option"
+									aria-selected={idx === activeIndex}
+									class="match-opt"
+									onmousedown={(e) => e.preventDefault()}
+									onclick={() => selectTitle(item)}
+									onmouseenter={() => (activeIndex = idx)}
+								>
+									<span class="t">
+										{before}{#if match}<mark>{match}</mark>{/if}{after}
+									</span>
+								</button>
+							{/each}
+						</div>
+						<div class="combo-foot">
+							<span class="tnum">{totalMatches} {totalMatches === 1 ? 'match' : 'matches'}</span>
+							<span class="key-hint">Enter picks the highlighted title</span>
+						</div>
+					</div>
+				{:else if dropdownOpen && titleQuery.trim().length >= 2 && filteredTitles.length === 0}
+					<div class="combo-panel empty-pop" role="status">
+						No catalog match — press Enter to submit as typed
+					</div>
+				{/if}
+			</div>
+		</div>
+
+		<!-- Episode Stepper -->
+		<div class="field">
+			<label for="episode-input">Episode</label>
+			<div class="stepper">
+				<button
+					type="button"
+					class="step-btn"
+					aria-label="One episode earlier"
+					disabled={disabled || submitting || !canDecrement}
+					onclick={() => nudgeEpisode(-1)}
+				>
+					<svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10h11" /></svg>
+				</button>
+
+				<div class="ep-val">
+					<span aria-hidden="true">EP</span>
+					<input
+						bind:this={episodeInputEl}
+						id="episode-input"
+						type="text"
+						inputmode="numeric"
+						pattern="[0-9]*"
+						aria-describedby={scoringNote ? 'scoring-note' : undefined}
+						disabled={disabled || submitting}
+						bind:value={episodeText}
+						style:width="{epInputWidthCh}ch"
+						oninput={() => {
+							episodeText = episodeText.replace(/[^0-9]/g, '').slice(0, 4);
+							const n = parseInt(episodeText, 10);
+							if (Number.isFinite(n) && n >= 1) onEpisodeChange?.(n);
+						}}
+						onblur={() => {
+							const ep = parsedEpisode();
+							episodeText = String(ep);
+							onEpisodeChange?.(ep);
+						}}
+						onkeydown={handleEpisodeKeydown}
+					/>
+				</div>
+
+				<button
+					type="button"
+					class="step-btn"
+					aria-label="One episode later"
+					disabled={disabled || submitting || !canIncrement}
+					onclick={() => nudgeEpisode(1)}
+				>
+					<svg class="icon" viewBox="0 0 20 20" aria-hidden="true">
+						<path d="M10 4.5v11M4.5 10h11" />
+					</svg>
+				</button>
+			</div>
+		</div>
+
+		<!-- Actions -->
+		<div class="actions">
+			<button
+				type="submit"
+				class="primary"
+				disabled={disabled || submitting || !titleQuery.trim()}
+			>
+				<span>{submitting ? 'Checking...' : submitLabel}</span>
+				{#if !submitting}
+					<kbd class="kbd-hint">Enter</kbd>
+				{/if}
+			</button>
+
+			<button
+				type="button"
+				class="quiet"
+				class:armed={armedSkip}
+				disabled={disabled || submitting}
+				onclick={handleSkipClick}
+			>
+				{armedSkip ? 'Confirm give up?' : skipLabel}
+			</button>
+		</div>
+
+		{#if scoringNote}
+			<p class="note" id="scoring-note">{scoringNote}</p>
+		{/if}
+	{/if}
 
 	{#if inlineError}
 		<div class="inline-error" role="alert">{inlineError}</div>
@@ -418,229 +533,234 @@
 </form>
 
 <style>
-	/* Dissolve redundant nested card: sit cleanly on the slate canvas under the Light Table */
-	.guess-console {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 196px auto;
-		gap: 12px;
-		align-items: end;
-		padding: 4px 2px 0;
+	.rail {
+		display: flex;
+		flex-direction: column;
+		gap: 18px;
+		min-width: 0;
 	}
 
-	.guess-console.compact {
-		grid-template-columns: minmax(0, 1fr) 196px;
-		padding: 4px 2px 0;
-		gap: 10px 12px;
-	}
-
-	.guess-console.compact .actions {
-		grid-column: 1 / -1;
-		display: grid;
-		grid-template-columns: 1fr auto;
+	.icon {
+		width: 18px;
+		height: 18px;
+		flex: none;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.75;
+		stroke-linecap: round;
+		stroke-linejoin: round;
 	}
 
 	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		min-width: 0;
+		display: grid;
+		gap: 8px;
+	}
+
+	.field > label {
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--text-2);
 	}
 
 	.title-field {
 		position: relative;
 	}
 
-	.field-head {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 8px;
+	.combo {
+		border: 1.5px solid var(--line-strong);
+		border-radius: var(--r);
+		background: var(--ink-deep);
+		overflow: hidden;
+		transition: border-color 120ms ease;
 	}
 
-	.field-label {
-		font-size: 13.5px;
-		font-weight: 700;
-		color: var(--text);
+	.combo:focus-within,
+	.combo.open {
+		border-color: var(--blue);
 	}
 
-	.field-hint {
-		font-size: 12px;
-		color: var(--text-3);
-		white-space: nowrap;
-	}
-
-	.combobox-wrap {
-		position: relative;
+	.combo-input {
 		display: flex;
 		align-items: center;
+		gap: 10px;
+		height: 50px;
+		padding: 0 6px 0 14px;
 	}
 
-	.search-icon {
-		position: absolute;
-		left: 13px;
-		color: var(--text-3);
-		pointer-events: none;
-	}
-
-	.title-input {
-		width: 100%;
-		height: 46px;
-		background: var(--ink-2);
-		border: 1.5px solid var(--rule-strong);
-		border-radius: var(--radius-md);
-		color: var(--text);
-		font-size: 15px;
-		font-weight: 500;
-		padding: 0 36px 0 38px;
-		outline: none;
-		transition: border-color 120ms ease, box-shadow 120ms ease;
-	}
-
-	.title-input::placeholder {
-		color: var(--text-3);
-	}
-
-	.title-input:focus {
-		border-color: var(--lamp);
-		box-shadow: 0 0 0 3px var(--lamp-soft);
-	}
-
-	.clear-btn {
-		position: absolute;
-		right: 8px;
-		width: 26px;
-		height: 26px;
-		border: 0;
-		border-radius: 6px;
-		background: transparent;
+	.search-ico {
 		color: var(--text-2);
-		font-size: 18px;
-		line-height: 1;
-		cursor: pointer;
+	}
+
+	.combo-input input {
+		flex: 1;
+		min-width: 0;
+		height: 100%;
+		border: 0;
+		outline: 0;
+		background: none;
+		font-size: 16.5px;
+		font-weight: 500;
+		color: var(--paper);
+	}
+
+	.combo-input input::placeholder {
+		color: var(--text-3);
+	}
+
+	.clear {
+		width: 36px;
+		height: 36px;
 		display: grid;
 		place-items: center;
+		border: 0;
+		border-radius: 6px;
+		background: none;
+		color: var(--text-2);
+		transition: background-color 120ms ease, color 120ms ease;
 	}
 
-	.clear-btn:hover {
-		background: var(--ink-3);
-		color: var(--text);
+	.clear:hover {
+		color: var(--paper);
+		background: var(--ink-raised);
 	}
 
-	/* Always opens downward below the input, sized to fit cleanly inside 900px without page scroll */
-	.dropdown {
-		position: absolute;
-		left: 0;
-		right: 0;
-		top: calc(100% + 6px);
-		z-index: 40;
-		background: var(--ink-1);
-		border: 1px solid var(--rule-strong);
-		border-radius: var(--radius-md);
-		max-height: 196px;
+	/* Unified in-flow combobox panel inside the 400px rail: never overlaps the frame OR hides the Episode stepper */
+	.combo-panel {
+		border-top: 1px solid var(--line);
+	}
+
+	.matches {
+		max-height: 204px;
 		overflow-y: auto;
-		box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
 	}
 
-	.dropdown-empty {
-		padding: 10px 14px;
-		font-size: 13px;
-		color: var(--text-3);
-	}
-
-	.dropdown-opt {
+	.match-opt {
 		width: 100%;
 		border: 0;
-		background: transparent;
-		color: var(--text-2);
+		background: none;
 		text-align: left;
-		padding: 10px 14px;
-		font-size: 14px;
-		cursor: pointer;
-		border-bottom: 1px solid rgba(38, 50, 65, 0.55);
 		display: block;
+		padding: 9px 14px;
+		cursor: pointer;
+		border-bottom: 1px solid var(--line-soft);
+		transition: background-color 100ms ease;
 	}
 
-	.dropdown-opt:last-child {
+	.match-opt:last-child {
 		border-bottom: 0;
 	}
 
-	.dropdown-opt.active,
-	.dropdown-opt:hover {
-		background: var(--ink-3);
-		color: var(--text);
+	.match-opt .t {
+		display: block;
+		font-size: 14.5px;
+		font-weight: 550;
+		color: var(--text-2);
+		overflow-wrap: anywhere;
+		line-height: 1.35;
 	}
 
-	.opt-match {
-		color: var(--lamp);
+	.match-opt .t mark {
+		background: none;
+		color: var(--paper);
 		font-weight: 700;
+	}
+
+	.match-opt:hover {
+		background: var(--line-soft);
+	}
+
+	.match-opt[aria-selected='true'] {
+		background: var(--ink-raised);
+	}
+
+	.match-opt[aria-selected='true'] .t {
+		color: var(--paper);
+	}
+
+	.combo-foot {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 7px 14px;
+		border-top: 1px solid var(--line);
+		background: var(--ink-deep);
+		font-size: 12.5px;
+		color: var(--text-3);
+	}
+
+	.empty-pop {
+		padding: 11px 14px;
+		font-size: 13.5px;
+		color: var(--text-2);
 	}
 
 	/* Episode Stepper */
 	.stepper {
-		height: 46px;
 		display: grid;
-		grid-template-columns: 40px 1fr 40px;
-		background: var(--ink-2);
-		border: 1.5px solid var(--rule-strong);
-		border-radius: var(--radius-md);
+		grid-template-columns: 52px minmax(0, 1fr) 52px;
+		height: 52px;
+		border: 1.5px solid var(--line-strong);
+		border-radius: var(--r);
+		background: var(--ink-deep);
 		overflow: hidden;
 	}
 
-	.stepper:focus-within {
-		border-color: var(--lamp);
-		box-shadow: 0 0 0 3px var(--lamp-soft);
+	.stepper.compact-stepper {
+		grid-template-columns: 44px minmax(0, 1fr) 44px;
 	}
 
 	.step-btn {
 		border: 0;
-		background: var(--ink-1);
-		color: var(--text);
-		font-size: 18px;
-		font-weight: 700;
-		cursor: pointer;
-		transition: background 120ms ease;
+		background: none;
+		display: grid;
+		place-items: center;
+		color: var(--paper);
+		transition: background-color 120ms ease;
 	}
 
 	.step-btn:hover:not(:disabled) {
-		background: var(--ink-3);
+		background: var(--ink-raised);
 	}
 
 	.step-btn:disabled {
-		opacity: 0.4;
-		cursor: not-allowed;
+		color: var(--line-strong);
+		cursor: default;
 	}
 
-	.step-btn:first-child {
-		border-right: 1px solid var(--rule);
+	.step-btn:focus-visible {
+		outline-offset: -3px;
 	}
 
-	.step-btn:last-child {
-		border-left: 1px solid var(--rule);
-	}
-
-	.ep-center {
+	.ep-val {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 5px;
-		padding: 0 6px;
+		gap: 8px;
+		border-inline: 1px solid var(--line);
 	}
 
-	.ep-prefix {
+	.ep-val:focus-within {
+		box-shadow: inset 0 0 0 2px var(--blue);
+	}
+
+	.ep-val span {
 		font-size: 14px;
-		font-weight: 700;
-		color: var(--text-3);
+		font-weight: 650;
+		color: var(--text-2);
 	}
 
-	.ep-input {
-		width: 52px;
-		background: transparent;
+	.ep-val input {
+		min-width: 1.8ch;
+		max-width: 5.5ch;
 		border: 0;
-		color: var(--text);
-		font-size: 20px;
-		font-weight: 700;
+		outline: 0;
+		background: none;
+		padding: 0;
 		text-align: center;
-		outline: none;
+		font-size: 24px;
+		font-weight: 750;
+		font-variant-numeric: tabular-nums;
+		color: var(--paper);
 	}
 
 	/* Actions */
@@ -650,103 +770,116 @@
 		gap: 8px;
 	}
 
-	.btn-submit {
-		height: 46px;
+	.daily-console {
+		display: grid;
+		grid-template-columns: 158px minmax(0, 1fr);
+		gap: 8px;
+	}
+
+	.locked-secondary {
+		display: flex;
+		justify-content: flex-end;
+		margin-top: -10px;
+	}
+
+	.primary {
+		flex: 1;
+		height: 52px;
 		padding: 0 18px;
-		background: var(--lamp);
-		color: var(--lamp-ink);
 		border: 0;
-		border-radius: var(--radius-md);
-		font-size: 14.5px;
-		font-weight: 700;
-		cursor: pointer;
+		border-radius: var(--r);
+		background: var(--paper);
+		color: var(--ink-deep);
+		font-size: 16.5px;
+		font-weight: 750;
+		white-space: nowrap;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 		gap: 8px;
-		white-space: nowrap;
-		transition: background 120ms ease, color 120ms ease;
+		transition: background-color 120ms ease, color 120ms ease;
 	}
 
-	.btn-submit:hover:not(:disabled) {
-		background: var(--lamp-hover);
+	.primary:hover:not(:disabled) {
+		background: var(--paper-hover);
 	}
 
-	/* Clean neutral disabled style instead of muddy translucent yellow */
-	.btn-submit:disabled {
-		background: var(--ink-3);
+	.primary:disabled {
+		background: var(--ink-raised);
 		color: var(--text-3);
-		border: 1px solid var(--rule);
+		box-shadow: inset 0 0 0 1px var(--line);
 		cursor: not-allowed;
-	}
-
-	.btn-submit:disabled .kbd-hint {
-		background: rgba(255, 255, 255, 0.06);
-		color: var(--text-3);
 	}
 
 	.kbd-hint {
 		font-family: inherit;
-		font-size: 11px;
+		font-size: 11.5px;
 		font-weight: 700;
 		padding: 2px 6px;
 		border-radius: 4px;
-		background: rgba(22, 17, 5, 0.16);
-		color: var(--lamp-ink);
+		background: rgba(20, 23, 48, 0.14);
+		color: var(--ink-deep);
 	}
 
-	.btn-skip {
-		height: 46px;
-		padding: 0 14px;
-		background: transparent;
-		border: 1px solid var(--rule-strong);
-		border-radius: var(--radius-md);
+	.primary:disabled .kbd-hint {
+		background: rgba(243, 239, 228, 0.08);
+		color: var(--text-3);
+	}
+
+	.quiet {
+		height: 52px;
+		padding: 0 16px;
+		border: 0;
+		border-radius: var(--r);
+		background: none;
 		color: var(--text-2);
-		font-size: 13.5px;
-		font-weight: 500;
-		cursor: pointer;
+		font-size: 15px;
+		font-weight: 600;
 		white-space: nowrap;
-		transition: background 120ms ease, color 120ms ease;
+		transition: background-color 120ms ease, color 120ms ease;
 	}
 
-	.btn-skip:hover:not(:disabled) {
-		background: var(--ink-2);
-		color: var(--text);
+	.quiet.small {
+		height: 36px;
+		padding: 0 12px;
+		font-size: 13.5px;
 	}
 
-	.btn-skip.armed {
-		border-color: var(--danger);
+	.quiet:hover:not(:disabled) {
+		color: var(--paper);
+		background: var(--ink-raised);
+	}
+
+	.quiet.armed {
 		background: var(--danger-soft);
-		color: #f8c2c9;
-		font-weight: 700;
+		color: var(--danger);
+		box-shadow: inset 0 0 0 1px rgba(240, 138, 150, 0.5);
+	}
+
+	.note {
+		margin: 0;
+		font-size: 13.5px;
+		color: var(--text-3);
+		max-width: 48ch;
 	}
 
 	.inline-error {
-		grid-column: 1 / -1;
 		background: var(--danger-soft);
-		border: 1px solid rgba(228, 108, 124, 0.45);
-		color: #f8c2c9;
-		border-radius: 8px;
-		padding: 8px 12px;
-		font-size: 13px;
+		border: 1px solid rgba(240, 138, 150, 0.45);
+		color: #ffd5da;
+		border-radius: var(--r);
+		padding: 9px 12px;
+		font-size: 13.5px;
 	}
 
-	@media (max-width: 860px) {
-		.guess-console,
-		.guess-console.compact {
-			grid-template-columns: 1fr;
-			padding: 4px 0 0;
-		}
-
-		.actions,
-		.guess-console.compact .actions {
-			display: grid;
-			grid-template-columns: 1fr auto;
-		}
-
-		.kbd-hint,
-		.desktop-only {
+	@media (max-width: 600px) {
+		.key-hint,
+		.kbd-hint {
 			display: none;
+		}
+
+		.daily-console {
+			grid-template-columns: 144px minmax(0, 1fr);
 		}
 	}
 </style>

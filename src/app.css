@@ -1,45 +1,35 @@
 @import 'tailwindcss';
 
 :root {
-	--ink-0: #0d131a;
-	--ink-1: #131b24;
-	--ink-2: #1a2430;
-	--ink-3: #223040;
-	--stage-black: #070a0f;
+	/* Animator's night desk: indigo ink, warm paper, pencil blue, correction-sheet green & yellow */
+	--ink: #1c2039;
+	--ink-deep: #141730;
+	--ink-raised: #272c50;
+	--stage-black: #0c0e1d;
 
-	--rule: #263241;
-	--rule-strong: #3a4a5f;
+	--line-soft: #2e3359;
+	--line: #3b4170;
+	--line-strong: #6b73a8;
 
-	--text: #edf1f6;
-	--text-2: #b4c0cf;
-	--text-3: #90a0b4;
+	--paper: #f3efe4;
+	--paper-hover: #ffffff;
+	--text-2: #b4b9d6;
+	--text-3: #979dbf;
 
-	--lamp: #f4c752;
-	--lamp-hover: #f8d474;
-	--lamp-ink: #161105;
-	--lamp-soft: rgba(244, 199, 82, 0.14);
-	--lamp-glow: rgba(244, 199, 82, 0.08);
+	--blue: #8fb4ff;
+	--blue-soft: rgba(143, 180, 255, 0.16);
+	--green: #9bddae;
+	--green-soft: rgba(155, 221, 174, 0.16);
+	--yellow: #f2d16b;
+	--yellow-soft: rgba(242, 209, 107, 0.16);
+	--danger: #f08a96;
+	--danger-soft: rgba(240, 138, 150, 0.15);
 
-	--hit: #5bcb95;
-	--hit-soft: rgba(91, 203, 149, 0.17);
-	--hit-ink: #082317;
-
-	--close: #f4c752;
-	--close-soft: rgba(244, 199, 82, 0.16);
-
-	--miss: #2a3545;
-	--miss-text: #c2cdd9;
-	--danger: #e46c7c;
-	--danger-soft: rgba(228, 108, 124, 0.16);
-
-	--dir: #314054;
-
-	--radius-sm: 6px;
-	--radius-md: 10px;
-	--radius-lg: 14px;
-
-	--font-body: 'Zen Kaku Gothic New', system-ui, -apple-system, sans-serif;
-	--font-display: 'Archivo Narrow', 'Arial Narrow', system-ui, sans-serif;
+	--font: 'Bricolage Grotesque', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+	--gutter: 32px;
+	--rail: 400px;
+	--r: 8px;
+	--r-sm: 5px;
 }
 
 *,
@@ -48,38 +38,80 @@
 	box-sizing: border-box;
 }
 
-html,
+html {
+	-webkit-text-size-adjust: 100%;
+	min-height: 100%;
+}
+
 body {
 	margin: 0;
 	padding: 0;
 	min-height: 100%;
-	background: var(--ink-0);
-	color: var(--text);
-	font-family: var(--font-body);
-	font-size: 15px;
-	line-height: 1.5;
+	background: var(--ink);
+	color: var(--paper);
+	font: 400 15px/1.45 var(--font);
+	font-optical-sizing: auto;
 	-webkit-font-smoothing: antialiased;
-}
-
-.font-display {
-	font-family: var(--font-display);
-	font-variant-numeric: tabular-nums;
-	letter-spacing: 0.01em;
-}
-
-.tabular {
-	font-variant-numeric: tabular-nums;
 }
 
 button,
 input,
 select {
-	font-family: inherit;
+	font: inherit;
+	color: inherit;
+}
+
+button {
+	cursor: pointer;
+}
+
+img,
+svg {
+	display: block;
 }
 
 :focus-visible {
-	outline: 2px solid var(--lamp);
+	outline: 2px solid var(--blue);
 	outline-offset: 2px;
+}
+
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+.tnum {
+	font-variant-numeric: tabular-nums;
+}
+
+/* Shared two-vertical alignment spine across header, session strip, and play stage */
+.shell {
+	width: 100%;
+	max-width: 1440px;
+	margin: 0 auto;
+	padding: 0 var(--gutter);
+}
+
+.cols {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) var(--rail);
+	column-gap: 32px;
+	row-gap: 20px;
+	align-items: start;
+}
+
+@media (max-width: 960px) {
+	:root {
+		--gutter: 16px;
+	}
+
+	.cols {
+		grid-template-columns: minmax(0, 1fr);
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {

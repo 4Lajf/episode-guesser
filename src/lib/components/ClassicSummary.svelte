@@ -23,20 +23,20 @@
 		try {
 			await navigator.clipboard.writeText(text);
 			copied = true;
-			setTimeout(() => (copied = false), 2000);
+			setTimeout(() => (copied = false), 2200);
 		} catch {
 			// ignore
 		}
 	}
 </script>
 
-<section class="summary-card" aria-label="Classic run summary">
+<section class="summary" aria-label="Classic run summary">
 	<div class="summary-hero">
 		<div>
-			<span class="rank-pill font-display">{rank}</span>
-			<h2 class="summary-score font-display">
-				{totalScore.toLocaleString('en-US')}
-				<span class="summary-max">/ {maxScore.toLocaleString('en-US')} pts</span>
+			<span class="rank-pill">{rank}</span>
+			<h2 class="summary-score tnum">
+				<span class="big">{totalScore.toLocaleString('en-US')}</span>
+				<span class="max">/ {maxScore.toLocaleString('en-US')} pts</span>
 			</h2>
 			<p class="summary-sub">
 				Matched {animeHits} of {rounds.length} shows from {username}.
@@ -44,11 +44,11 @@
 		</div>
 
 		<div class="summary-actions">
-			<button type="button" class="btn-primary" onclick={onPlayAgain}>Play 5 new frames</button>
-			<button type="button" class="btn-secondary" onclick={copySummary}>
+			<button type="button" class="primary" onclick={onPlayAgain}>Play 5 new frames</button>
+			<button type="button" class="outline" onclick={copySummary}>
 				{copied ? 'Copied results' : 'Copy results'}
 			</button>
-			<button type="button" class="btn-ghost" onclick={onSwitchDaily}>Try Daily Wordle</button>
+			<button type="button" class="quiet" onclick={onSwitchDaily}>Try Daily Wordle</button>
 		</div>
 	</div>
 
@@ -65,18 +65,22 @@
 				<div class="round-info">
 					<div class="round-show">{entry.result.reveal.titleRomaji}</div>
 					<div class="round-ep">
-						Episode {entry.result.reveal.episodeNumber}{#if entry.result.reveal.episodeTitle} — {entry.result.reveal.episodeTitle}{/if}
+						Episode {entry.result.reveal.episodeNumber}{#if entry.result.reveal.episodeTitle}, “{entry.result.reveal.episodeTitle}”{/if}
 					</div>
 					<div class="round-guess">
 						{#if entry.result.skipped}
 							Skipped
 						{:else}
-							You guessed {entry.result.guessedTitle}{#if entry.result.guessedEpisode !== null}, EP {entry.result.guessedEpisode}{/if}
+							You said {entry.result.guessedTitle}{#if entry.result.guessedEpisode !== null}, EP {entry.result.guessedEpisode}{/if}
 						{/if}
 					</div>
 				</div>
 
-				<div class="round-pts font-display" class:hit={entry.result.totalPoints >= 800} class:mid={entry.result.totalPoints >= 450 && entry.result.totalPoints < 800}>
+				<div
+					class="round-pts tnum"
+					class:hit={entry.result.totalPoints >= 800}
+					class:mid={entry.result.totalPoints >= 450 && entry.result.totalPoints < 800}
+				>
 					+{entry.result.totalPoints}
 				</div>
 			</div>
@@ -85,51 +89,57 @@
 </section>
 
 <style>
-	.summary-card {
-		background: var(--ink-1);
-		border: 1px solid var(--rule);
-		border-radius: var(--radius-lg);
-		padding: 24px;
+	.summary {
 		display: flex;
 		flex-direction: column;
-		gap: 20px;
+		gap: 24px;
+		padding-top: 8px;
 	}
 
 	.summary-hero {
 		display: flex;
-		align-items: center;
+		align-items: flex-end;
 		justify-content: space-between;
-		gap: 20px;
+		gap: 24px;
 		flex-wrap: wrap;
 	}
 
 	.rank-pill {
 		display: inline-block;
-		background: var(--lamp-soft);
-		color: var(--lamp);
-		border: 1px solid rgba(244, 199, 82, 0.35);
-		font-size: 14px;
+		background: var(--blue-soft);
+		color: var(--blue);
+		font-size: 13.5px;
 		font-weight: 700;
-		padding: 3px 10px;
-		border-radius: 6px;
-		margin-bottom: 8px;
+		padding: 4px 10px;
+		border-radius: var(--r-sm);
+		margin-bottom: 10px;
 	}
 
 	.summary-score {
 		margin: 0;
-		font-size: 46px;
-		line-height: 1;
-		color: var(--text);
+		display: flex;
+		align-items: baseline;
+		gap: 10px;
 	}
 
-	.summary-max {
+	.summary-score .big {
+		font-size: 72px;
+		line-height: 0.9;
+		font-weight: 800;
+		font-stretch: 80%;
+		letter-spacing: -0.02em;
+		color: var(--paper);
+	}
+
+	.summary-score .max {
 		font-size: 20px;
-		color: var(--text-3);
+		font-weight: 500;
+		color: var(--text-2);
 	}
 
 	.summary-sub {
-		margin: 6px 0 0;
-		font-size: 14px;
+		margin: 8px 0 0;
+		font-size: 15px;
 		color: var(--text-2);
 	}
 
@@ -140,64 +150,75 @@
 		flex-wrap: wrap;
 	}
 
-	.btn-primary {
-		height: 44px;
-		padding: 0 20px;
-		background: var(--lamp);
-		color: var(--lamp-ink);
+	.primary {
+		height: 48px;
+		padding: 0 22px;
+		background: var(--paper);
+		color: var(--ink-deep);
 		border: 0;
-		border-radius: var(--radius-md);
-		font-size: 14.5px;
-		font-weight: 700;
-		cursor: pointer;
+		border-radius: var(--r);
+		font-size: 16px;
+		font-weight: 750;
+		transition: background-color 120ms ease;
 	}
 
-	.btn-primary:hover {
-		background: var(--lamp-hover);
+	.primary:hover {
+		background: var(--paper-hover);
 	}
 
-	.btn-secondary,
-	.btn-ghost {
-		height: 44px;
+	.outline {
+		height: 48px;
+		padding: 0 18px;
+		background: none;
+		border: 1.5px solid var(--line-strong);
+		border-radius: var(--r);
+		color: var(--paper);
+		font-size: 15px;
+		font-weight: 650;
+		transition: border-color 120ms ease, background-color 120ms ease;
+	}
+
+	.outline:hover {
+		border-color: var(--paper);
+		background: var(--ink-raised);
+	}
+
+	.quiet {
+		height: 48px;
 		padding: 0 16px;
-		background: var(--ink-2);
-		border: 1px solid var(--rule-strong);
-		border-radius: var(--radius-md);
-		color: var(--text);
-		font-size: 14px;
-		font-weight: 500;
-		cursor: pointer;
+		background: none;
+		border: 0;
+		border-radius: var(--r);
+		color: var(--text-2);
+		font-size: 15px;
+		font-weight: 600;
+		transition: background-color 120ms ease, color 120ms ease;
 	}
 
-	.btn-ghost {
-		background: transparent;
-		color: var(--text-2);
+	.quiet:hover {
+		color: var(--paper);
+		background: var(--ink-raised);
 	}
 
 	.round-list {
 		display: flex;
 		flex-direction: column;
-		border-top: 1px solid var(--rule);
+		border-top: 1px solid var(--line);
 	}
 
 	.round-item {
 		display: grid;
-		grid-template-columns: 128px minmax(0, 1fr) auto;
-		gap: 14px;
+		grid-template-columns: 144px minmax(0, 1fr) auto;
+		gap: 16px;
 		align-items: center;
-		padding: 12px 4px;
-		border-bottom: 1px solid var(--rule);
-	}
-
-	.round-item:last-child {
-		border-bottom: 0;
-		padding-bottom: 0;
+		padding: 14px 0;
+		border-bottom: 1px solid var(--line-soft);
 	}
 
 	.thumb-wrap {
-		width: 128px;
+		width: 144px;
 		aspect-ratio: 16 / 9;
-		border-radius: 5px;
+		border-radius: var(--r-sm);
 		overflow: hidden;
 		background: var(--stage-black);
 	}
@@ -206,7 +227,6 @@
 		width: 100%;
 		height: 100%;
 		object-fit: contain;
-		display: block;
 	}
 
 	.round-info {
@@ -215,47 +235,50 @@
 
 	.round-show {
 		font-weight: 700;
-		font-size: 15px;
-		color: var(--text);
+		font-size: 16px;
+		color: var(--paper);
 	}
 
 	.round-ep {
-		font-size: 13px;
+		font-size: 14px;
 		color: var(--text-2);
 	}
 
 	.round-guess {
-		font-size: 12.5px;
+		font-size: 13px;
 		color: var(--text-3);
 		margin-top: 2px;
 	}
 
 	.round-pts {
-		font-size: 22px;
-		font-weight: 700;
-		color: var(--text-2);
+		font-size: 24px;
+		font-weight: 750;
+		color: var(--text-3);
 		white-space: nowrap;
 	}
 
 	.round-pts.hit {
-		color: var(--hit);
+		color: var(--green);
 	}
 
 	.round-pts.mid {
-		color: var(--lamp);
+		color: var(--yellow);
 	}
 
 	@media (max-width: 640px) {
-		.summary-card {
-			padding: 16px;
+		.summary-score .big {
+			font-size: 56px;
 		}
+
 		.round-item {
-			grid-template-columns: 92px minmax(0, 1fr) auto;
-			gap: 10px;
+			grid-template-columns: 96px minmax(0, 1fr) auto;
+			gap: 12px;
 		}
+
 		.thumb-wrap {
-			width: 92px;
+			width: 96px;
 		}
+
 		.summary-actions {
 			width: 100%;
 			flex-direction: column;

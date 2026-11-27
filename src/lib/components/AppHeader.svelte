@@ -28,8 +28,8 @@
 			? 'GL'
 			: username
 					.replace(/[^a-zA-Z0-9]/g, '')
-					.slice(0, 2)
-					.toUpperCase() || 'AL'
+					.slice(0, 1)
+					.toUpperCase() || 'A'
 	);
 
 	const modes: Array<{ id: GameMode; label: string }> = [
@@ -39,260 +39,259 @@
 	];
 </script>
 
-<header class="topbar">
-	<div class="topbar-inner">
-		<a
-			class="brand"
-			href="/"
-			onclick={(e) => {
-				e.preventDefault();
-				onModeChange('classic');
-			}}
+<header class="top">
+	<div class="shell cols top-cols">
+		<div class="top-left">
+			<a
+				class="brand"
+				href="/"
+				onclick={(e) => {
+					e.preventDefault();
+					onModeChange('classic');
+				}}
+			>
+				<svg class="brand-mark" viewBox="0 0 28 20" aria-hidden="true">
+					<rect
+						x="1"
+						y="1"
+						width="26"
+						height="18"
+						rx="3"
+						fill="none"
+						stroke="#F3EFE4"
+						stroke-width="1.75"
+					/>
+					<rect x="8" y="6" width="12" height="8" rx="1.5" fill="#8FB4FF" />
+				</svg>
+				<span>Episode Guesser</span>
+			</a>
+
+			<nav class="modes" aria-label="Game mode">
+				{#each modes as item (item.id)}
+					<button
+						type="button"
+						class="mode-tab"
+						aria-current={mode === item.id ? 'page' : undefined}
+						onclick={() => onModeChange(item.id)}
+					>
+						{#if item.id === 'daily' && dailyUnplayed}
+							<span class="daily-dot" aria-hidden="true"></span>
+						{/if}
+						<span>{item.label}</span>
+					</button>
+				{/each}
+			</nav>
+		</div>
+
+		<button
+			type="button"
+			class="player"
+			onclick={onOpenSetup}
+			aria-label="{isGlobalPool
+				? `Curated Global Pool, ${eligibleShows} shows`
+				: `AniList account ${username}, ${eligibleShows} shows`}. Change account or list filters"
 		>
-			<span class="peg-mark" aria-hidden="true">
-				<span class="peg-slot"></span>
-				<span class="peg-hole"></span>
-				<span class="peg-slot"></span>
-			</span>
-			<span class="brand-name font-display">Episode Guesser</span>
-		</a>
-
-		<nav class="mode-switcher" aria-label="Game mode">
-			{#each modes as item (item.id)}
-				<button
-					type="button"
-					class="mode-btn"
-					class:active={mode === item.id}
-					aria-pressed={mode === item.id}
-					onclick={() => onModeChange(item.id)}
-				>
-					{#if item.id === 'daily' && dailyUnplayed}
-						<span class="daily-dot" aria-hidden="true"></span>
-					{/if}
-					<span>{item.label}</span>
-				</button>
-			{/each}
-		</nav>
-
-		<button type="button" class="user-pill" onclick={onOpenSetup} title="Change AniList user or filters">
 			{#if avatar}
-				<img class="user-avatar-img" src={avatar} alt="" width="28" height="28" />
+				<img class="avatar-img" src={avatar} alt="" width="32" height="32" />
 			{:else}
-				<span class="user-avatar font-display" aria-hidden="true">{initials}</span>
+				<span class="avatar" aria-hidden="true">{initials}</span>
 			{/if}
-			<span class="user-meta">
-				<span class="user-name">{username}</span>
-				<span class="user-sub tabular">{eligibleShows} shows</span>
+			<span class="player-text">
+				<span class="player-name">{username}</span>
+				<span class="player-meta tnum">{eligibleShows} shows</span>
 			</span>
+			<svg class="chev" viewBox="0 0 20 20" aria-hidden="true">
+				<path d="M6 8l4 4 4-4" />
+			</svg>
 		</button>
 	</div>
 </header>
 
 <style>
-	.topbar {
-		position: sticky;
-		top: 0;
-		z-index: 30;
-		background: rgba(13, 19, 26, 0.92);
-		backdrop-filter: blur(10px);
-		border-bottom: 1px solid var(--rule);
+	.top {
+		background: var(--ink-deep);
+		border-bottom: 1px solid var(--line-soft);
 	}
 
-	.topbar-inner {
-		max-width: 1180px;
-		margin: 0 auto;
-		padding: 0 24px;
-		min-height: 64px;
-		display: grid;
-		grid-template-columns: 1fr auto 1fr;
+	.top-cols {
+		height: 60px;
 		align-items: center;
-		gap: 16px;
+		row-gap: 0;
+	}
+
+	.top-left {
+		display: flex;
+		align-items: center;
+		gap: 32px;
+		height: 100%;
+		min-width: 0;
 	}
 
 	.brand {
 		display: inline-flex;
 		align-items: center;
 		gap: 10px;
+		font-size: 18px;
+		font-weight: 750;
+		letter-spacing: -0.01em;
 		text-decoration: none;
-		color: var(--text);
-		justify-self: start;
-	}
-
-	.peg-mark {
-		width: 30px;
-		height: 22px;
-		border-radius: 5px;
-		background: var(--lamp);
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 3px;
-		padding: 0 4px;
-		flex-shrink: 0;
-	}
-
-	.peg-slot {
-		width: 6px;
-		height: 3.5px;
-		border-radius: 999px;
-		background: var(--lamp-ink);
-	}
-
-	.peg-hole {
-		width: 4.5px;
-		height: 4.5px;
-		border-radius: 50%;
-		background: var(--lamp-ink);
-	}
-
-	.brand-name {
-		font-size: 20px;
-		font-weight: 700;
-		line-height: 1;
-		color: var(--text);
-	}
-
-	.mode-switcher {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		background: var(--ink-1);
-		border: 1px solid var(--rule);
-		border-radius: 999px;
-		padding: 4px;
-		justify-self: center;
-	}
-
-	.mode-btn {
-		border: 0;
-		background: transparent;
-		color: var(--text-2);
-		font-size: 13.5px;
-		font-weight: 500;
-		padding: 6px 14px;
-		border-radius: 999px;
-		cursor: pointer;
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
+		color: var(--paper);
 		white-space: nowrap;
-		transition: background 120ms ease, color 120ms ease;
 	}
 
-	.mode-btn:hover {
-		color: var(--text);
+	.brand-mark {
+		width: 28px;
+		height: 20px;
+		flex: none;
 	}
 
-	.mode-btn.active {
-		background: var(--text);
-		color: var(--ink-0);
-		font-weight: 700;
+	.modes {
+		display: flex;
+		height: 100%;
+	}
+
+	.mode-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		padding: 0 14px;
+		border: 0;
+		border-block: 2px solid transparent;
+		background: none;
+		color: var(--text-2);
+		font-size: 15px;
+		font-weight: 500;
+		white-space: nowrap;
+		transition: color 120ms ease, border-color 120ms ease;
+	}
+
+	.mode-tab:hover {
+		color: var(--paper);
+	}
+
+	.mode-tab[aria-current='page'] {
+		color: var(--paper);
+		font-weight: 650;
+		border-bottom-color: var(--blue);
 	}
 
 	.daily-dot {
 		width: 6px;
 		height: 6px;
 		border-radius: 50%;
-		background: var(--lamp);
-		flex-shrink: 0;
+		background: var(--yellow);
+		flex: none;
 	}
 
-	.mode-btn.active .daily-dot {
-		background: var(--ink-0);
-	}
-
-	.user-pill {
+	.player {
 		justify-self: end;
 		display: inline-flex;
 		align-items: center;
 		gap: 10px;
-		background: var(--ink-1);
-		border: 1px solid var(--rule);
-		border-radius: 999px;
-		padding: 5px 13px 5px 6px;
-		color: var(--text);
-		cursor: pointer;
+		padding: 5px 8px 5px 5px;
+		border: 0;
+		border-radius: var(--r);
+		background: none;
 		text-align: left;
-		transition: border-color 120ms ease, background 120ms ease;
+		transition: background-color 120ms ease;
 	}
 
-	.user-pill:hover {
-		border-color: var(--rule-strong);
-		background: var(--ink-2);
+	.player:hover {
+		background: var(--ink-raised);
 	}
 
-	.user-avatar,
-	.user-avatar-img {
-		width: 28px;
-		height: 28px;
+	.avatar,
+	.avatar-img {
+		width: 32px;
+		height: 32px;
 		border-radius: 50%;
-		flex-shrink: 0;
+		flex: none;
 	}
 
-	.user-avatar {
-		background: var(--ink-3);
-		color: var(--lamp);
-		font-size: 13px;
-		font-weight: 700;
+	.avatar {
 		display: grid;
 		place-items: center;
+		background: var(--ink-raised);
+		color: var(--paper);
+		font-weight: 700;
+		font-size: 14px;
 	}
 
-	.user-avatar-img {
+	.avatar-img {
 		object-fit: cover;
-		display: block;
 	}
 
-	.user-meta {
+	.player-text {
 		display: flex;
 		flex-direction: column;
-		line-height: 1.15;
+		min-width: 0;
 	}
 
-	.user-name {
-		font-size: 13px;
-		font-weight: 700;
-		max-width: 120px;
+	.player-name {
+		display: block;
+		font-weight: 650;
+		font-size: 14px;
+		line-height: 1.2;
+		color: var(--paper);
+		max-width: 140px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
-	.user-sub {
-		font-size: 11.5px;
-		color: var(--text-3);
+	.player-meta {
+		display: block;
+		font-size: 12.5px;
+		line-height: 1.3;
+		color: var(--text-2);
 	}
 
-	@media (max-width: 760px) {
-		.topbar-inner {
-			grid-template-columns: 1fr auto;
-			padding: 10px 14px;
-			gap: 10px;
+	.chev {
+		width: 16px;
+		height: 16px;
+		flex: none;
+		fill: none;
+		stroke: var(--text-3);
+		stroke-width: 1.75;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	@media (max-width: 960px) {
+		.top-cols {
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-areas:
+				'brand player'
+				'modes modes';
+			height: auto;
+			column-gap: 12px;
+			row-gap: 4px;
+			padding-top: 8px;
+		}
+
+		.top-left {
+			display: contents;
 		}
 
 		.brand {
-			grid-row: 1;
-			grid-column: 1;
+			grid-area: brand;
 		}
 
-		.user-pill {
-			grid-row: 1;
-			grid-column: 2;
+		.player {
+			grid-area: player;
 		}
 
-		.mode-switcher {
-			grid-row: 2;
-			grid-column: 1 / -1;
-			width: 100%;
-			justify-self: stretch;
+		.modes {
+			grid-area: modes;
 			display: grid;
-			grid-template-columns: repeat(3, 1fr);
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			height: 42px;
 		}
 
-		.mode-btn {
+		.mode-tab {
 			justify-content: center;
-			padding: 7px 8px;
-			font-size: 13px;
+			padding: 0 4px;
+			font-size: 14px;
 		}
 	}
 </style>

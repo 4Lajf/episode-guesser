@@ -3,6 +3,7 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import ClassicSummary from '$lib/components/ClassicSummary.svelte';
 	import DailyBoard from '$lib/components/DailyBoard.svelte';
+	import DailyZoomLadder from '$lib/components/DailyZoomLadder.svelte';
 	import FrameLightbox from '$lib/components/FrameLightbox.svelte';
 	import GuessConsole from '$lib/components/GuessConsole.svelte';
 	import LightTable from '$lib/components/LightTable.svelte';
@@ -86,7 +87,7 @@
 	let streak = $state(0);
 	let bestStreak = $state(0);
 
-	// Shared Classic/Unlimited reveal
+	// Shared Classic/Unlimited reveal (renders inside right rail while frame stays pinned!)
 	let activeReveal = $state<ClassicGuessResponse | null>(null);
 	let seenMediaIds = $state<number[]>([]);
 
@@ -97,8 +98,8 @@
 	let dailyFinished = $state(false);
 	let dailyWon = $state(false);
 	let dailyReveal = $state<EpisodeReveal | null>(null);
+	let dailyLiveEpisode = $state(1);
 
-	// Merged, year-preserving deduplicated dropdown titles (cached AnisongDB + profile titles)
 	const dropdownTitles = $derived.by(() => {
 		const byKey = new Map<string, string>();
 		for (const t of anisongDbTitles) {
@@ -114,17 +115,69 @@
 		);
 	});
 
-	const dailyZoomScale = $derived.by(() => {
-		if (mode !== 'daily') return 1;
-		if (dailyFinished) return 1;
-		const idx = Math.min(dailyAttempts.length, WORDLE_ZOOM_STEPS.length - 1);
-		return WORDLE_ZOOM_STEPS[idx];
+	const dailyActiveStepIndex = $derived(
+		dailyFinished
+			? WORDLE_ZOOM_STEPS.length - 1
+			: Math.min(dailyAttempts.length, WORDLE_ZOOM_STEPS.length - 1)
+	);
+
+	const dailyZoomScale = $derived(WORDLE_ZOOM_STEPS[dailyActiveStepIndex]);
+
+	const dailyMatchedAttempt = $derived.by(() => {
+		if (mode !== 'daily' || dailyFinished) return null;
+		return dailyAttempts.find((a) => a.animeStatus === 'hit') ?? null;
 	});
 
-	const dailyMatchedAnimeTitle = $derived.by(() => {
-		if (mode !== 'daily' || dailyFinished) return '';
-		const hit = dailyAttempts.find((a) => a.animeStatus === 'hit');
-		return hit ? hit.guessedTitle : '';
+	// Derive tightest known episode bounds from all directional hints (only on attempts with valid episodeDirection)
+	const dailyEpisodeBounds = $derived.by(() => {
+		let minEp = 1;
+		let maxEp: number | null = null;
+		for (const a of dailyAttempts) {
+			if (a.guessedEpisode <= 0) continue;
+			if (a.episodeDirection === 'up') {
+				minEp = Math.max(minEp, a.guessedEpisode + 1);
+			} else if (a.episodeDirection === 'down') {
+				const cand = Math.max(1, a.guessedEpisode - 1);
+				maxEp = maxEp === null ? cand : Math.min(maxEp, cand);
+			}
+		}
+		if (maxEp !== null && minEp > maxEp) {
+			minEp = 1;
+			maxEp = null;
+		}
+		const suggested =
+			maxEp !== null ? Math.round((minEp + maxEp) / 2) : Math.max(1, minEp);
+		let hint = '';
+		if (dailyMatchedAttempt) {
+			if (minEp > 1 && maxEp !== null) {
+				hint =
+					minEp === maxEp
+						? `It must be episode ${minEp}.`
+						: `The episode is between ${minEp} and ${maxEp}.`;
+			} else if (maxEp !== null) {
+				hint = `The episode is earlier than ${maxEp + 1}.`;
+			} else if (minEp > 1) {
+				hint = `The episode is later than ${minEp - 1}.`;
+			} else {
+				hint = 'Narrow down the episode number.';
+			}
+		}
+		return { minEp, maxEp, suggested, hint };
+	});
+
+	const activeImageUrl = $derived(activeReveal?.reveal.imageUrl ?? currentRound?.imageUrl ?? null);
+
+	const celNote = $derived.by(() => {
+		if (mode === 'daily') {
+			if (dailyFinished) return 'Full 1.0× frame unlocked';
+			return `Zoom ${dailyZoomScale.toFixed(1)}×, wider after every miss`;
+		}
+		if (activeReveal) {
+			return mode === 'classic'
+				? `Round ${classicRoundIndex + 1} frame`
+				: `Frame #${unlimitedCount + 1}`;
+		}
+		return '';
 	});
 
 	function syncModeUrl(nextMode: GameMode) {
@@ -136,7 +189,6 @@
 	}
 
 	function applyDailyStateFromPayload(payload: RoundPayload) {
-		// Server dailyStore + eg_pid cookie is the authoritative source of truth for Daily state
 		if (payload.dailyRestore) {
 			dailyAttempts = payload.dailyRestore.attempts;
 			dailyFinished = payload.dailyRestore.finished;
@@ -342,6 +394,21 @@
 		fetchRound(nextMode);
 	}
 
+	function toggleDailyScope() {
+		dailyUseGlobal = !dailyUseGlobal;
+		try {
+			localStorage.setItem(STORAGE_DAILY_SCOPE_KEY, dailyUseGlobal ? '1' : '0');
+		} catch {
+			// ignore
+		}
+		dailyAttempts = [];
+		dailyFinished = false;
+		dailyWon = false;
+		dailyReveal = null;
+		dailyStateToken = null;
+		fetchRound('daily');
+	}
+
 	async function submitGuess(guessedTitle: string, guessedEpisode: number, skipped = false) {
 		if (!currentRound || submitting) return;
 
@@ -393,7 +460,9 @@
 				const errMsg: string = data.error || 'Could not check your guess.';
 				if (
 					reqMode === 'daily' &&
-					(res.status === 409 || res.status === 403 || /expired|mismatch|out of sync/i.test(errMsg))
+					(res.status === 409 ||
+						res.status === 403 ||
+						/expired|mismatch|out of sync/i.test(errMsg))
 				) {
 					roundError = 'Daily session refreshed — loading today’s puzzle.';
 					submitting = false;
@@ -554,148 +623,164 @@
 		}}
 	/>
 
-	<main class="main-stage">
-		{#if profile.isGlobalPool && !profileLoading}
+	{#if profile.isGlobalPool && !profileLoading}
+		<div class="shell nudge-wrap">
 			<div class="anilist-nudge">
-				<span>Playing curated Global Pool ({profile.eligibleShows} iconic anime). Enter your AniList to guess frames from your own watched shows.</span>
+				<span>
+					Playing curated Global Pool ({profile.eligibleShows} iconic anime). Connect your AniList to guess frames from your own watched shows.
+				</span>
 				<button type="button" class="nudge-btn" onclick={() => (setupOpen = true)}>
 					Connect AniList
 				</button>
 			</div>
-		{/if}
+		</div>
+	{/if}
 
-		<SessionBar
-			{mode}
-			{classicRoundIndex}
-			{classicHistory}
-			{classicScore}
-			{unlimitedCount}
-			{unlimitedScore}
-			{streak}
-			{bestStreak}
-			dailyPuzzleNumber={currentRound?.dailyMeta?.puzzleNumber}
-			dailyScopeLabel={currentRound?.dailyMeta?.scopeLabel}
-			dailyAttemptsCount={dailyAttempts.length}
-			dailyGaveUp={dailyAttempts.some((a) => a.gaveUp)}
-			{dailyWon}
-			{dailyFinished}
-		/>
+	<SessionBar
+		{mode}
+		{classicRoundIndex}
+		{classicHistory}
+		{classicScore}
+		{unlimitedCount}
+		{unlimitedScore}
+		{streak}
+		{bestStreak}
+		dailyPuzzleNumber={currentRound?.dailyMeta?.puzzleNumber}
+		dailyScopeLabel={currentRound?.dailyMeta?.scopeLabel}
+		dailyAttemptsCount={dailyAttempts.length}
+		dailyGaveUp={dailyAttempts.some((a) => a.gaveUp)}
+		{dailyWon}
+		{dailyFinished}
+		canSwitchDailyScope={mode === 'daily' && !profile.isGlobalPool}
+		isGlobalDaily={dailyUseGlobal}
+		onToggleDailyScope={toggleDailyScope}
+	/>
+
+	<main class="stage">
+		<h1 class="sr-only">
+			{#if mode === 'classic'}
+				Classic game, round {Math.min(classicRoundIndex + 1, CLASSIC_ROUNDS)} of {CLASSIC_ROUNDS}
+			{:else if mode === 'unlimited'}
+				Unlimited mode, frame {unlimitedCount + 1}
+			{:else}
+				Daily Frame-Wordle
+			{/if}
+		</h1>
 
 		{#if roundError}
-			<div class="error-banner" role="alert">
-				<span>{roundError}</span>
-				<button type="button" class="retry-btn" onclick={() => fetchRound(mode)}>Try another frame</button>
+			<div class="shell">
+				<div class="error-banner" role="alert">
+					<span>{roundError}</span>
+					<button type="button" class="retry-btn" onclick={() => fetchRound(mode)}>
+						Try another frame
+					</button>
+				</div>
 			</div>
 		{/if}
 
-		<!-- Classic Summary Screen -->
 		{#if mode === 'classic' && classicFinished}
-			<ClassicSummary
-				username={profile.username}
-				rounds={classicHistory}
-				onPlayAgain={() => resetAndStartMode('classic')}
-				onSwitchDaily={() => resetAndStartMode('daily')}
-			/>
-		{:else if (mode === 'classic' || mode === 'unlimited') && activeReveal}
-			<!-- Round Reveal Screen -->
-			<RoundReveal
-				result={activeReveal}
-				shortcutsEnabled={!setupOpen && !lightboxOpen}
-				nextLabel={mode === 'classic' && classicRoundIndex + 1 >= CLASSIC_ROUNDS
-					? 'View final summary'
-					: 'Next frame'}
-				onNext={advanceAfterReveal}
-				onInspect={() => openInspect(activeReveal?.reveal.imageUrl ?? null)}
-			/>
-		{:else if mode === 'daily'}
-			<!-- Daily Frame-Wordle: 2-column desktop; mobile orders Frame -> Board -> Console so feedback is immediately visible -->
-			<div class="daily-workspace">
-				<div class="daily-left">
-					<div class="daily-frame-slot">
-						<LightTable
-							imageUrl={currentRound?.imageUrl ?? null}
-							loading={profileLoading || roundLoading}
-							compact={true}
-							caption=""
-							cropScale={dailyZoomScale}
-							allowInspect={dailyFinished}
-							onInspect={() => openInspect(currentRound?.imageUrl ?? null)}
-						/>
-					</div>
+			<div class="shell">
+				<ClassicSummary
+					username={profile.username}
+					rounds={classicHistory}
+					onPlayAgain={() => resetAndStartMode('classic')}
+					onSwitchDaily={() => resetAndStartMode('daily')}
+				/>
+			</div>
+		{:else}
+			<!-- Unified 2-column stage: Left cel stays pinned in the exact same position across Guess, Reveal, and Daily -->
+			<div class="shell cols">
+				<div class="left-stage">
+					<LightTable
+						imageUrl={activeImageUrl}
+						loading={profileLoading || roundLoading}
+						note={celNote}
+						alt={activeReveal
+							? `Frame from ${activeReveal.reveal.titleRomaji}, episode ${activeReveal.reveal.episodeNumber}`
+							: mode === 'daily'
+								? `Today's frame at ${dailyZoomScale.toFixed(1)}× zoom`
+								: 'Anime episode screencap to guess'}
+						allowInspect={mode !== 'daily' || dailyFinished}
+						onInspect={() => openInspect(activeImageUrl)}
+					/>
 
-					{#if !dailyFinished}
-						<div class="daily-console-slot">
-							<GuessConsole
-								titles={dropdownTitles}
-								{submitting}
-								compact={true}
-								disabled={profileLoading || roundLoading || !currentRound}
-								submitLabel="Submit attempt"
-								skipLabel="Give up"
-								confirmSkip={true}
-								episodeHint="↑↓ direction hints"
-								prefillTitle={dailyMatchedAnimeTitle}
-								inlineError={guessInlineError}
-								roundKey={`daily-${roundCounter}-${dailyAttempts.length}`}
-								onSubmit={(title, ep) => submitGuess(title, ep, false)}
-								onSkip={() => submitGuess('', 1, true)}
-							/>
-						</div>
+					{#if mode === 'daily'}
+						<DailyZoomLadder activeStepIndex={dailyActiveStepIndex} finished={dailyFinished} />
 					{/if}
 				</div>
 
-				{#if currentRound?.dailyMeta}
-					<div class="daily-board-slot">
-						<DailyBoard
-							puzzleNumber={currentRound.dailyMeta.puzzleNumber}
-							scopeLabel={currentRound.dailyMeta.scopeLabel}
-							attempts={dailyAttempts}
-							finished={dailyFinished}
-							won={dailyWon}
-							reveal={dailyReveal}
-							canSwitchScope={!profile.isGlobalPool}
-							isGlobalDaily={dailyUseGlobal}
-							onToggleScope={() => {
-								dailyUseGlobal = !dailyUseGlobal;
-								try {
-									localStorage.setItem(STORAGE_DAILY_SCOPE_KEY, dailyUseGlobal ? '1' : '0');
-								} catch {
-									// ignore
-								}
-								dailyAttempts = [];
-								dailyFinished = false;
-								dailyWon = false;
-								dailyReveal = null;
-								dailyStateToken = null;
-								fetchRound('daily');
-							}}
-						/>
-					</div>
-				{/if}
-			</div>
-		{:else}
-			<!-- Classic / Unlimited Active Play Stage -->
-			<LightTable
-				imageUrl={currentRound?.imageUrl ?? null}
-				loading={profileLoading || roundLoading}
-				caption=""
-				cropScale={1}
-				allowInspect={true}
-				onInspect={() => openInspect(currentRound?.imageUrl ?? null)}
-			/>
+				<div class="right-rail" class:daily-rail={mode === 'daily'}>
+					{#if mode === 'daily'}
+						{#if currentRound?.dailyMeta}
+							<div class="daily-board-slot">
+								<DailyBoard
+									puzzleNumber={currentRound.dailyMeta.puzzleNumber}
+									puzzleDate={currentRound.dailyMeta.date}
+									scopeLabel={currentRound.dailyMeta.scopeLabel}
+									attempts={dailyAttempts}
+									finished={dailyFinished}
+									won={dailyWon}
+									reveal={dailyReveal}
+									lockedAnimeTitle={dailyMatchedAttempt?.guessedTitle ?? ''}
+									lockedYear={dailyMatchedAttempt?.guessedYear ?? null}
+									liveEpisode={dailyLiveEpisode}
+									hintText={dailyEpisodeBounds.hint}
+								/>
+							</div>
+						{/if}
 
-			<GuessConsole
-				titles={dropdownTitles}
-				{submitting}
-				disabled={profileLoading || roundLoading || !currentRound}
-				submitLabel="Lock in guess"
-				skipLabel="Skip frame"
-				episodeHint="Near misses still score"
-				inlineError={guessInlineError}
-				roundKey={`${mode}-${roundCounter}`}
-				onSubmit={(title, ep) => submitGuess(title, ep, false)}
-				onSkip={() => submitGuess('', 1, true)}
-			/>
+						{#if !dailyFinished}
+							<div class="daily-input-slot">
+								<GuessConsole
+									titles={dropdownTitles}
+									{submitting}
+									disabled={profileLoading || roundLoading || !currentRound}
+									submitLabel="Lock in guess"
+									skipLabel="Give up"
+									confirmSkip={true}
+									lockedAnimeTitle={dailyMatchedAttempt?.guessedTitle ?? ''}
+									minEpisode={dailyMatchedAttempt ? dailyEpisodeBounds.minEp : 1}
+									maxEpisode={dailyMatchedAttempt ? dailyEpisodeBounds.maxEp : null}
+									initialEpisode={dailyEpisodeBounds.suggested}
+									inlineError={guessInlineError}
+									roundKey={`daily-${roundCounter}-${dailyAttempts.length}`}
+									onEpisodeChange={(ep) => (dailyLiveEpisode = ep)}
+									onSubmit={(title, ep) => submitGuess(title, ep, false)}
+									onSkip={() => submitGuess('', 1, true)}
+								/>
+							</div>
+						{/if}
+					{:else if activeReveal}
+						<RoundReveal
+							result={activeReveal}
+							kicker={mode === 'classic'
+								? `Round ${classicRoundIndex + 1} result`
+								: `Frame #${unlimitedCount + 1} result`}
+							nextLabel={mode === 'classic' && classicRoundIndex + 1 >= CLASSIC_ROUNDS
+								? 'View final summary'
+								: 'Next frame'}
+							afterSummary={mode === 'classic'
+								? `${classicScore.toLocaleString('en-US')} after ${classicRoundIndex + 1} of ${CLASSIC_ROUNDS}`
+								: `${unlimitedScore.toLocaleString('en-US')} total`}
+							shortcutsEnabled={!setupOpen && !lightboxOpen}
+							onNext={advanceAfterReveal}
+						/>
+					{:else}
+						<GuessConsole
+							titles={dropdownTitles}
+							{submitting}
+							disabled={profileLoading || roundLoading || !currentRound}
+							submitLabel="Lock in guess"
+							skipLabel="Skip frame"
+							scoringNote="500 points for the right anime, up to 500 more the closer your episode is."
+							inlineError={guessInlineError}
+							roundKey={`${mode}-${roundCounter}`}
+							onSubmit={(title, ep) => submitGuess(title, ep, false)}
+							onSkip={() => submitGuess('', 1, true)}
+						/>
+					{/if}
+				</div>
+			</div>
 		{/if}
 	</main>
 </div>
@@ -727,36 +812,16 @@
 		flex-direction: column;
 	}
 
-	.main-stage {
-		width: 100%;
-		max-width: 1180px;
-		margin: 0 auto;
-		padding: 16px 24px 28px;
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-	}
-
-	.daily-workspace {
-		display: grid;
-		grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.9fr);
-		gap: 18px;
-		align-items: start;
-	}
-
-	.daily-left {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		min-width: 0;
+	.nudge-wrap {
+		padding-top: 10px;
 	}
 
 	.anilist-nudge {
-		background: var(--ink-1);
-		border: 1px solid var(--rule);
-		border-left: 3px solid var(--lamp);
-		border-radius: var(--radius-md);
-		padding: 10px 14px;
+		background: var(--ink-deep);
+		border: 1px solid var(--line);
+		border-left: 3px solid var(--blue);
+		border-radius: var(--r);
+		padding: 9px 14px;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -766,84 +831,83 @@
 	}
 
 	.nudge-btn {
-		background: var(--lamp);
-		color: var(--lamp-ink);
+		background: var(--paper);
+		color: var(--ink-deep);
 		border: 0;
-		border-radius: 7px;
-		padding: 7px 13px;
-		font-size: 13px;
+		border-radius: 6px;
+		padding: 7px 14px;
+		font-size: 13.5px;
 		font-weight: 700;
-		cursor: pointer;
 		white-space: nowrap;
-		flex-shrink: 0;
+		flex: none;
+		transition: background-color 120ms ease;
 	}
 
 	.nudge-btn:hover {
-		background: var(--lamp-hover);
+		background: var(--paper-hover);
+	}
+
+	.stage {
+		padding-bottom: 36px;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+	}
+
+	.left-stage {
+		min-width: 0;
+	}
+
+	.right-rail {
+		display: flex;
+		flex-direction: column;
+		gap: 18px;
+		min-width: 0;
 	}
 
 	.error-banner {
 		background: var(--danger-soft);
-		border: 1px solid rgba(228, 108, 124, 0.45);
-		color: #f8c2c9;
-		border-radius: var(--radius-md);
+		border: 1px solid rgba(240, 138, 150, 0.45);
+		color: #ffd5da;
+		border-radius: var(--r);
 		padding: 11px 14px;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		font-size: 13.5px;
+		font-size: 14px;
 	}
 
 	.retry-btn {
-		background: var(--ink-2);
-		border: 1px solid var(--rule-strong);
-		color: var(--text);
+		background: var(--ink-deep);
+		border: 1px solid var(--line-strong);
+		color: var(--paper);
 		border-radius: 6px;
 		padding: 6px 12px;
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
+		font-size: 13.5px;
+		font-weight: 600;
 		white-space: nowrap;
 	}
 
-	@media (max-width: 1120px) {
-		.daily-workspace {
-			grid-template-columns: 1fr;
-			gap: 14px;
-		}
+	.retry-btn:hover {
+		background: var(--ink-raised);
+	}
 
-		.daily-left {
-			display: contents;
-		}
-
-		.daily-frame-slot {
+	@media (max-width: 960px) {
+		/* On narrow viewports, put Daily guess controls directly beneath the frame/zoom ladder so the image stays visible while typing */
+		.right-rail.daily-rail .daily-input-slot {
 			order: 1;
 		}
 
-		.daily-board-slot {
+		.right-rail.daily-rail .daily-board-slot {
 			order: 2;
-		}
-
-		.daily-console-slot {
-			order: 3;
 		}
 	}
 
-	@media (max-width: 760px) {
-		.main-stage {
-			padding: 14px 14px 40px;
-			gap: 12px;
-		}
-
+	@media (max-width: 640px) {
 		.anilist-nudge {
 			flex-direction: column;
-			align-items: stretch;
-			font-size: 13px;
-		}
-
-		.nudge-btn {
-			text-align: center;
+			align-items: flex-start;
 		}
 	}
 </style>

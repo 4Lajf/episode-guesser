@@ -9,7 +9,6 @@
 
 	let { open, imageUrl, onClose }: Props = $props();
 	let closeBtnEl = $state<HTMLButtonElement | null>(null);
-	let dialogEl = $state<HTMLDivElement | null>(null);
 	let previouslyFocused: HTMLElement | null = null;
 
 	$effect(() => {
@@ -37,7 +36,6 @@
 
 {#if open && imageUrl}
 	<div
-		bind:this={dialogEl}
 		class="lightbox-backdrop"
 		role="dialog"
 		aria-modal="true"
@@ -66,7 +64,7 @@
 		position: fixed;
 		inset: 0;
 		z-index: 60;
-		background: rgba(7, 10, 15, 0.9);
+		background: rgba(12, 14, 29, 0.92);
 		backdrop-filter: blur(8px);
 		display: grid;
 		place-items: center;
@@ -84,28 +82,29 @@
 	}
 
 	.close-btn {
-		background: var(--ink-2);
-		border: 1px solid var(--rule-strong);
-		color: var(--text);
-		font-size: 13px;
-		font-weight: 500;
-		padding: 6px 12px;
-		border-radius: 7px;
-		cursor: pointer;
+		background: var(--ink-deep);
+		border: 1.5px solid var(--line-strong);
+		color: var(--paper);
+		font-size: 13.5px;
+		font-weight: 600;
+		padding: 6px 14px;
+		border-radius: var(--r);
+		transition: background-color 120ms ease, border-color 120ms ease;
 	}
 
 	.close-btn:hover {
-		background: var(--ink-3);
+		background: var(--ink-raised);
+		border-color: var(--paper);
 	}
 
 	.lightbox-img {
 		max-width: 96vw;
-		max-height: calc(92vh - 46px);
+		max-height: calc(92vh - 48px);
 		width: auto;
 		height: auto;
 		object-fit: contain;
-		border-radius: 6px;
-		border: 1px solid var(--rule-strong);
+		border-radius: var(--r);
+		border: 1px solid var(--line);
 		background: var(--stage-black);
 	}
 </style>

@@ -120,13 +120,15 @@
 		>
 			<div class="modal-head">
 				<div>
-					<h2 id="setup-modal-title" class="modal-title font-display">Load your AniList</h2>
+					<h2 id="setup-modal-title" class="modal-title">Load your AniList</h2>
 					<p class="modal-sub">
 						Frames are picked from shows you have watched. Ongoing shows are capped to your episode progress.
 					</p>
 				</div>
 				{#if canDismiss}
-					<button type="button" class="close-x" aria-label="Close" onclick={onClose}>×</button>
+					<button type="button" class="close-x" aria-label="Close" onclick={onClose}>
+						<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" /></svg>
+					</button>
 				{/if}
 			</div>
 
@@ -216,7 +218,7 @@
 		position: fixed;
 		inset: 0;
 		z-index: 50;
-		background: rgba(7, 10, 15, 0.8);
+		background: rgba(12, 14, 29, 0.82);
 		backdrop-filter: blur(6px);
 		display: grid;
 		place-items: center;
@@ -225,13 +227,14 @@
 
 	.modal-card {
 		width: min(100%, 480px);
-		background: var(--ink-1);
-		border: 1px solid var(--rule-strong);
-		border-radius: var(--radius-lg);
-		padding: 22px;
+		background: var(--ink);
+		border: 1.5px solid var(--line);
+		border-radius: 12px;
+		padding: 24px;
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
+		gap: 18px;
+		box-shadow: 0 24px 60px rgba(8, 10, 22, 0.72);
 	}
 
 	.modal-head {
@@ -243,32 +246,44 @@
 
 	.modal-title {
 		margin: 0;
-		font-size: 26px;
-		line-height: 1.1;
-		color: var(--text);
+		font-size: 24px;
+		font-weight: 750;
+		line-height: 1.15;
+		letter-spacing: -0.01em;
+		color: var(--paper);
 	}
 
 	.modal-sub {
 		margin: 6px 0 0;
-		font-size: 13.5px;
+		font-size: 14px;
 		color: var(--text-2);
 	}
 
 	.close-x {
 		border: 0;
-		background: var(--ink-2);
+		background: none;
 		color: var(--text-2);
-		width: 32px;
-		height: 32px;
-		border-radius: 8px;
-		font-size: 20px;
-		cursor: pointer;
-		flex-shrink: 0;
+		width: 34px;
+		height: 34px;
+		border-radius: var(--r);
+		display: grid;
+		place-items: center;
+		flex: none;
+		transition: background-color 120ms ease, color 120ms ease;
+	}
+
+	.close-x svg {
+		width: 18px;
+		height: 18px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.75;
+		stroke-linecap: round;
 	}
 
 	.close-x:hover {
-		background: var(--ink-3);
-		color: var(--text);
+		background: var(--ink-raised);
+		color: var(--paper);
 	}
 
 	.setup-form {
@@ -278,9 +293,9 @@
 	}
 
 	.field-label {
-		font-size: 13.5px;
-		font-weight: 700;
-		color: var(--text);
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--text-2);
 	}
 
 	.input-row {
@@ -290,41 +305,45 @@
 	}
 
 	.user-input {
-		height: 44px;
-		background: var(--ink-2);
-		border: 1.5px solid var(--rule-strong);
-		border-radius: var(--radius-md);
-		color: var(--text);
+		height: 46px;
+		background: var(--ink-deep);
+		border: 1.5px solid var(--line-strong);
+		border-radius: var(--r);
+		color: var(--paper);
 		padding: 0 13px;
-		font-size: 15px;
+		font-size: 15.5px;
 		outline: none;
+		transition: border-color 120ms ease;
+	}
+
+	.user-input::placeholder {
+		color: var(--text-3);
 	}
 
 	.user-input:focus {
-		border-color: var(--lamp);
-		box-shadow: 0 0 0 3px var(--lamp-soft);
+		border-color: var(--blue);
 	}
 
 	.btn-load {
-		height: 44px;
+		height: 46px;
 		padding: 0 18px;
-		background: var(--lamp);
-		color: var(--lamp-ink);
+		background: var(--paper);
+		color: var(--ink-deep);
 		border: 0;
-		border-radius: var(--radius-md);
-		font-size: 14px;
-		font-weight: 700;
-		cursor: pointer;
+		border-radius: var(--r);
+		font-size: 15px;
+		font-weight: 750;
+		transition: background-color 120ms ease;
 	}
 
 	.btn-load:hover:not(:disabled) {
-		background: var(--lamp-hover);
+		background: var(--paper-hover);
 	}
 
 	.btn-load:disabled {
-		background: var(--ink-3);
+		background: var(--ink-raised);
 		color: var(--text-3);
-		border: 1px solid var(--rule);
+		box-shadow: inset 0 0 0 1px var(--line);
 		cursor: not-allowed;
 	}
 
@@ -336,30 +355,30 @@
 	}
 
 	.recent-label {
-		font-size: 12.5px;
+		font-size: 13px;
 		color: var(--text-3);
 	}
 
 	.recent-chip {
-		background: var(--ink-2);
-		border: 1px solid var(--rule);
+		background: var(--ink-deep);
+		border: 1px solid var(--line);
 		border-radius: 999px;
 		color: var(--text-2);
-		font-size: 12.5px;
-		padding: 3px 10px;
-		cursor: pointer;
+		font-size: 13px;
+		padding: 3px 11px;
+		transition: border-color 120ms ease, color 120ms ease;
 	}
 
 	.recent-chip:hover {
-		border-color: var(--lamp);
-		color: var(--text);
+		border-color: var(--blue);
+		color: var(--paper);
 	}
 
 	.filter-block {
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
-		margin-top: 2px;
+		margin-top: 4px;
 	}
 
 	.status-grid {
@@ -369,43 +388,43 @@
 	}
 
 	.status-toggle {
-		background: var(--ink-2);
-		border: 1px solid var(--rule);
+		background: var(--ink-deep);
+		border: 1px solid var(--line);
 		border-radius: 7px;
 		color: var(--text-2);
-		font-size: 13px;
+		font-size: 13.5px;
 		padding: 6px 11px;
-		cursor: pointer;
+		transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 	}
 
 	.status-toggle.selected {
-		background: var(--lamp-soft);
-		border-color: rgba(244, 199, 82, 0.55);
-		color: var(--lamp);
-		font-weight: 700;
+		background: var(--blue-soft);
+		border-color: var(--blue);
+		color: var(--paper);
+		font-weight: 650;
 	}
 
 	.checkbox-row {
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		font-size: 13px;
+		font-size: 13.5px;
 		color: var(--text-2);
 		margin-top: 4px;
 		cursor: pointer;
 	}
 
 	.checkbox-row input {
-		accent-color: var(--lamp);
+		accent-color: var(--blue);
 		width: 15px;
 		height: 15px;
 	}
 
 	.error-box {
 		background: var(--danger-soft);
-		border: 1px solid rgba(228, 108, 124, 0.45);
-		color: #f8c2c9;
-		border-radius: 8px;
+		border: 1px solid rgba(240, 138, 150, 0.45);
+		color: #ffd5da;
+		border-radius: var(--r);
 		padding: 10px 12px;
 		font-size: 13.5px;
 	}
@@ -415,7 +434,7 @@
 		align-items: center;
 		gap: 10px;
 		color: var(--text-3);
-		font-size: 12.5px;
+		font-size: 13px;
 	}
 
 	.modal-divider::before,
@@ -423,21 +442,22 @@
 		content: '';
 		flex: 1;
 		height: 1px;
-		background: var(--rule);
+		background: var(--line);
 	}
 
 	.btn-global {
-		height: 42px;
-		background: var(--ink-2);
-		border: 1px solid var(--rule-strong);
-		border-radius: var(--radius-md);
-		color: var(--text);
-		font-size: 13.5px;
-		font-weight: 500;
-		cursor: pointer;
+		height: 46px;
+		background: none;
+		border: 1.5px solid var(--line-strong);
+		border-radius: var(--r);
+		color: var(--paper);
+		font-size: 14.5px;
+		font-weight: 650;
+		transition: border-color 120ms ease, background-color 120ms ease;
 	}
 
 	.btn-global:hover:not(:disabled) {
-		background: var(--ink-3);
+		border-color: var(--paper);
+		background: var(--ink-raised);
 	}
 </style>
