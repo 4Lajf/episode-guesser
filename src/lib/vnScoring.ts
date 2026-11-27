@@ -1,7 +1,9 @@
-import { matchAnimeTitle, normalizeTitle } from './scoring';
-import type { Direction, TileStatus, VnAttemptFeedback } from './types';
+import { getTodayUtcDate, matchAnimeTitle, normalizeTitle } from './scoring';
+import type { Direction, TileStatus, VnAttemptFeedback, VnCompletedSurvivalRound } from './types';
 
 export const VN_MAX_ATTEMPTS = 5;
+export const VN_SURVIVAL_MAX_LIVES = 3;
+export const VN_SURVIVAL_STAGE_POINTS = [1000, 800, 600, 400, 200] as const;
 export const VN_STAGE_LABELS = [
 	'UI skin',
 	'Full UI',
@@ -10,13 +12,36 @@ export const VN_STAGE_LABELS = [
 	'Full frame'
 ] as const;
 
-export const VN_DAILY_EPOCH_DATE = '2026-11-27';
-const VN_DAILY_EPOCH_MS = Date.UTC(2026, 10, 27);
+export const VN_DAILY_EPOCH_DATE = '2025-11-27';
+const VN_DAILY_EPOCH_MS = Date.UTC(2025, 10, 27);
 
 export function getVnDailyPuzzleNumber(dateStr: string): number {
 	const [y, m, d] = dateStr.split('-').map(Number);
 	const ts = Date.UTC(y, (m || 1) - 1, d || 1);
 	return Math.max(1, Math.floor((ts - VN_DAILY_EPOCH_MS) / 86_400_000) + 1);
+}
+
+export function isValidVnDailyDate(
+	dateStr: string,
+	todayUtc: string = getTodayUtcDate()
+): boolean {
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+	const parsed = new Date(`${dateStr}T00:00:00Z`);
+	if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== dateStr) {
+		return false;
+	}
+	return dateStr >= VN_DAILY_EPOCH_DATE && dateStr <= todayUtc;
+}
+
+export function listVnDailyDatesDescending(todayUtc: string = getTodayUtcDate()): string[] {
+	const dates: string[] = [];
+	const cur = new Date(`${todayUtc}T00:00:00Z`);
+	const start = new Date(`${VN_DAILY_EPOCH_DATE}T00:00:00Z`);
+	while (cur >= start) {
+		dates.push(cur.toISOString().slice(0, 10));
+		cur.setUTCDate(cur.getUTCDate() - 1);
+	}
+	return dates;
 }
 
 export function formatVnLength(minutes: number | null): string {
@@ -147,6 +172,20 @@ export function calculateVnPoints(attempts: VnAttemptFeedback[], won: boolean): 
 	return 0;
 }
 
+export function scoreVnSurvivalRound(vnStatus: TileStatus, stageUsed: number): {
+	points: number;
+	lostLife: boolean;
+} {
+	if (vnStatus === 'hit') {
+		const idx = Math.min(Math.max(0, stageUsed - 1), VN_SURVIVAL_STAGE_POINTS.length - 1);
+		return { points: VN_SURVIVAL_STAGE_POINTS[idx], lostLife: false };
+	}
+	if (vnStatus === 'close') {
+		return { points: 300, lostLife: false };
+	}
+	return { points: 0, lostLife: true };
+}
+
 export function buildVnShareText(params: {
 	puzzleNumber?: number;
 	isDaily: boolean;
@@ -170,4 +209,26 @@ export function buildVnShareText(params: {
 		: `Episode Guesser VN UI — ${scoreStr} · ${pts.toLocaleString('en-US')} pts`;
 
 	return [header, ...lines, '<https://episode-guesser.karczma.moe/?mode=vn>'].join('\n');
+}
+
+export function buildVnSurvivalShareText(params: {
+	rounds: VnCompletedSurvivalRound[];
+	peakStreak: number;
+}): string {
+	const total = params.rounds.reduce((sum, r) => sum + r.points, 0);
+	const bars = params.rounds
+		.slice(0, 20)
+		.map((r) => {
+			if (r.vnStatus === 'hit') return '🟩';
+			if (r.vnStatus === 'close') return '🟨';
+			return '🟥';
+		})
+		.join('');
+	const overflow = params.rounds.length > 20 ? ` +${params.rounds.length - 20}` : '';
+
+	return [
+		`Episode Guesser VN UI Survival — ${total.toLocaleString('en-US')} pts · ${params.rounds.length} ${params.rounds.length === 1 ? 'VN' : 'VNs'} · Streak ${params.peakStreak}`,
+		`${bars}${overflow}`,
+		'<https://episode-guesser.karczma.moe/?mode=vn>'
+	].join('\n');
 }

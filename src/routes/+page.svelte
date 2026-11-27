@@ -1170,6 +1170,7 @@
 		{#if activeTab === 'vn'}
 			<div class="shell">
 				<VnUiGame
+					{authUser}
 					onZoom={(url) => {
 						lightboxImage = url;
 						lightboxOpen = true;

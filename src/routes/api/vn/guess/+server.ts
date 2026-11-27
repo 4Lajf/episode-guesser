@@ -1,13 +1,15 @@
 import { json } from '@sveltejs/kit';
 import { normalizeTitle } from '$lib/scoring';
-import { getEffectiveDailyPlayerId } from '$lib/server/auth';
+import { getAuthUser, getEffectiveDailyPlayerId } from '$lib/server/auth';
 import { mintVnImageUrl } from '$lib/server/picker';
 import { sealPayload, unsealPayload } from '$lib/server/token';
 import { lookupVnById, lookupVnByTitle } from '$lib/server/vnCatalog';
 import { getVnDailyRecord, saveVnDailyRecord } from '$lib/server/vnDailyStore';
+import { getCachedRuntimeVn, lookupVnByIdLive } from '$lib/server/vndbLive';
+import { recordVnLeaderboardResult } from '$lib/server/vnLeaderboardStore';
 import type { SealedVnRoundSecret, SealedVnState } from '$lib/server/vnSession';
 import type { VnAttemptFeedback, VnGuessResponse } from '$lib/types';
-import { evaluateVnAttempt, VN_MAX_ATTEMPTS } from '$lib/vnScoring';
+import { evaluateVnAttempt, scoreVnSurvivalRound, VN_MAX_ATTEMPTS } from '$lib/vnScoring';
 import type { RequestHandler } from './$types';
 
 const inFlightVnSessions = new Set<string>();
@@ -55,6 +57,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		return json({ error: 'Session cookie mismatch. Reload the VN puzzle.' }, { status: 403 });
 	}
 
+	const authUser = getAuthUser(cookies);
 	const lockKey = `${secret.playerId}|${secret.roundId}`;
 	if (inFlightVnSessions.has(lockKey)) {
 		return json({ error: 'A guess is already being checked for this puzzle.' }, { status: 409 });
@@ -63,6 +66,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	try {
 		const isDaily = secret.subMode === 'daily' && Boolean(secret.dailyDate);
+		const isSurvival = secret.subMode === 'survival';
+		const maxAttempts = isSurvival ? 1 : VN_MAX_ATTEMPTS;
 		const serverRec =
 			isDaily && secret.dailyDate ? getVnDailyRecord(secret.playerId, secret.dailyDate) : null;
 
@@ -71,7 +76,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				return json({ error: 'Daily VN session out of sync. Reloading.' }, { status: 409 });
 			}
 			if (serverRec.finished || serverRec.attempts.length >= VN_MAX_ATTEMPTS) {
-				return json({ error: 'Today’s VN UI puzzle is already finished.' }, { status: 400 });
+				return json({ error: 'This Daily VN UI puzzle is already finished.' }, { status: 400 });
 			}
 			if (state.attemptsUsed !== serverRec.attempts.length) {
 				return json({ error: 'Daily VN session out of sync. Reloading.' }, { status: 409 });
@@ -80,7 +85,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			return json({ error: 'Daily VN session out of sync. Reloading.' }, { status: 409 });
 		}
 
-		if (state.finished || state.attemptsUsed >= VN_MAX_ATTEMPTS) {
+		if (state.finished || state.attemptsUsed >= maxAttempts) {
 			return json({ error: 'This VN UI puzzle is already finished.' }, { status: 400 });
 		}
 
@@ -92,7 +97,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			const giveUpAttempt: VnAttemptFeedback = {
 				attemptNumber,
 				guessedId: null,
-				guessedTitle: 'Gave up',
+				guessedTitle: isSurvival ? 'Skipped' : 'Gave up',
 				guessedYear: null,
 				guessedLengthMinutes: null,
 				guessedStudio: null,
@@ -113,13 +118,14 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				subMode: secret.subMode,
 				playerId: secret.playerId,
 				...(secret.dailyDate ? { dailyDate: secret.dailyDate } : {}),
+				stage: 5,
 				attemptsUsed: attemptNumber,
 				finished: true,
 				usedKeys
 			});
 
+			const finalAttempts = [...(serverRec?.attempts ?? []), giveUpAttempt];
 			if (isDaily && secret.dailyDate) {
-				const prevAttempts = serverRec?.attempts ?? [];
 				saveVnDailyRecord(secret.playerId, {
 					date: secret.dailyDate,
 					roundId: secret.roundId,
@@ -127,13 +133,21 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 					stateToken: nextStateToken,
 					currentStage: 5,
 					currentImageUrl: secret.reveal.imageUrl,
-					attempts: [...prevAttempts, giveUpAttempt],
+					attempts: finalAttempts,
 					usedIds: usedKeys,
 					finished: true,
 					won: false,
 					reveal: secret.reveal,
 					updatedAt: Date.now()
 				});
+				if (authUser) {
+					recordVnLeaderboardResult({
+						date: secret.dailyDate,
+						user: authUser,
+						attempts: finalAttempts,
+						won: false
+					});
+				}
 			}
 
 			const response: VnGuessResponse = {
@@ -143,15 +157,23 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				nextStage: 5,
 				nextImageUrl: secret.reveal.imageUrl,
 				stateToken: nextStateToken,
+				...(isSurvival ? { pointsAwarded: 0, lostLife: true } : {}),
 				...(secret.hintTags.length > 0 ? { hintTags: secret.hintTags } : {}),
+				...(secret.hintQuote ? { hintQuote: secret.hintQuote } : {}),
 				reveal: secret.reveal
 			};
 			return json(response);
 		}
 
 		const rawTitle = (body.guessedTitle ?? '').trim().slice(0, 160);
-		const matchedEntry =
-			lookupVnById(body.guessedId) ?? (rawTitle ? lookupVnByTitle(rawTitle) : null);
+		let matchedEntry =
+			lookupVnById(body.guessedId) ??
+			(body.guessedId ? getCachedRuntimeVn(body.guessedId) : null) ??
+			(rawTitle ? lookupVnByTitle(rawTitle) : null);
+
+		if (!matchedEntry && body.guessedId && /^v\d+$/.test(body.guessedId)) {
+			matchedEntry = await lookupVnByIdLive(body.guessedId);
+		}
 
 		const displayTitle = matchedEntry?.t ?? rawTitle;
 		if (!displayTitle) {
@@ -159,7 +181,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		}
 
 		const guessKey = matchedEntry ? matchedEntry.id : normalizeTitle(displayTitle);
-		if (usedKeys.includes(guessKey)) {
+		if (!isSurvival && usedKeys.includes(guessKey)) {
 			return json(
 				{ error: 'You already guessed that visual novel. Try a different title.' },
 				{ status: 400 }
@@ -184,7 +206,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			targetDevelopers: secret.targetDevelopers
 		});
 
-		const finished = attempt.solved || attemptNumber >= VN_MAX_ATTEMPTS;
+		const finished = isSurvival || attempt.solved || attemptNumber >= maxAttempts;
 		const nextStage = (finished ? 5 : Math.min(5, attemptNumber + 1)) as 1 | 2 | 3 | 4 | 5;
 		const nextImageUrl =
 			nextStage >= 5
@@ -199,13 +221,14 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			subMode: secret.subMode,
 			playerId: secret.playerId,
 			...(secret.dailyDate ? { dailyDate: secret.dailyDate } : {}),
+			stage: nextStage,
 			attemptsUsed: attemptNumber,
 			finished,
 			usedKeys: nextUsedKeys
 		});
 
+		const finalAttempts = [...(serverRec?.attempts ?? []), attempt];
 		if (isDaily && secret.dailyDate) {
-			const prevAttempts = serverRec?.attempts ?? [];
 			saveVnDailyRecord(secret.playerId, {
 				date: secret.dailyDate,
 				roundId: secret.roundId,
@@ -213,19 +236,33 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				stateToken: nextStateToken,
 				currentStage: nextStage,
 				currentImageUrl: nextImageUrl,
-				attempts: [...prevAttempts, attempt],
+				attempts: finalAttempts,
 				usedIds: nextUsedKeys,
 				finished,
 				won: attempt.solved,
 				...(finished ? { reveal: secret.reveal } : {}),
 				updatedAt: Date.now()
 			});
+			if (finished && authUser) {
+				recordVnLeaderboardResult({
+					date: secret.dailyDate,
+					user: authUser,
+					attempts: finalAttempts,
+					won: attempt.solved
+				});
+			}
 		}
+
+		const survivalScoring = isSurvival
+			? scoreVnSurvivalRound(attempt.vnStatus, state.stage)
+			: null;
 
 		const hintTags =
 			(attemptNumber >= 2 || finished) && secret.hintTags.length > 0
 				? secret.hintTags
 				: undefined;
+		const hintQuote =
+			(attemptNumber >= 3 || finished) && secret.hintQuote ? secret.hintQuote : undefined;
 
 		const response: VnGuessResponse = {
 			attempt,
@@ -234,7 +271,11 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			nextStage,
 			nextImageUrl,
 			stateToken: nextStateToken,
+			...(survivalScoring
+				? { pointsAwarded: survivalScoring.points, lostLife: survivalScoring.lostLife }
+				: {}),
 			...(hintTags ? { hintTags } : {}),
+			...(hintQuote ? { hintQuote } : {}),
 			...(finished ? { reveal: secret.reveal } : {})
 		};
 

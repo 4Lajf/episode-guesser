@@ -2,7 +2,68 @@ export type GameMode = 'classic' | 'unlimited' | 'daily';
 
 export type NavTab = GameMode | 'archive' | 'vn';
 
-export type VnUiSubMode = 'daily' | 'practice';
+export type VnUiSubMode = 'daily' | 'archive' | 'practice' | 'survival';
+
+export type VnPoolSize = 1000 | 250;
+
+export interface VndbUserProfile {
+	userId: string;
+	username: string;
+	totalEntries: number;
+	eligibleVns: number;
+	labelIds: number[];
+	isGlobalPool: boolean;
+	poolSize?: VnPoolSize;
+}
+
+export interface VnLeaderboardAttemptSummary {
+	v: TileStatus;
+	y: TileStatus;
+	l: TileStatus;
+	s: TileStatus;
+	g?: boolean;
+}
+
+export interface VnDailyLeaderboardEntry {
+	anilistUserId: number;
+	username: string;
+	avatar: string | null;
+	siteUrl: string;
+	won: boolean;
+	gaveUp: boolean;
+	attemptsUsed: number;
+	points: number;
+	completedAt: number;
+	tiles: VnLeaderboardAttemptSummary[];
+}
+
+export interface VnDailyLeaderboardPayload {
+	date: string;
+	puzzleNumber: number;
+	totalPlayers: number;
+	solvedCount: number;
+	entries: VnDailyLeaderboardEntry[];
+	me: { rank: number; entry: VnDailyLeaderboardEntry } | null;
+	authConfigured: boolean;
+}
+
+export interface VnArchiveDaySummary {
+	date: string;
+	puzzleNumber: number;
+	status: ArchiveDayStatus;
+	attemptsUsed: number;
+	leaderboardCount: number;
+	leaderboardSolved: number;
+}
+
+export interface VnArchivePayload {
+	today: string;
+	startDate: string;
+	totalDays: number;
+	solvedCount: number;
+	playedCount: number;
+	days: VnArchiveDaySummary[];
+}
 
 export interface VnAutocompleteEntry {
 	id: string;
@@ -23,6 +84,7 @@ export interface VnReveal {
 	developers: string[];
 	isNvl: boolean;
 	tags: string[];
+	quote?: string | null;
 	imageUrl: string;
 	vndbUrl: string;
 }
@@ -48,14 +110,17 @@ export interface VnRoundPayload {
 	roundToken: string;
 	stateToken: string;
 	imageUrl: string;
-	subMode: VnUiSubMode;
+	subMode: 'daily' | 'practice' | 'survival';
 	stage: number;
 	maxAttempts: number;
 	isNvl: boolean;
+	scopeLabel?: string;
 	hintTags?: string[];
+	hintQuote?: string | null;
 	dailyMeta?: {
 		date: string;
 		puzzleNumber: number;
+		isArchive?: boolean;
 	};
 	restore?: {
 		attempts: VnAttemptFeedback[];
@@ -72,8 +137,21 @@ export interface VnGuessResponse {
 	nextStage: number;
 	nextImageUrl: string;
 	stateToken: string;
+	pointsAwarded?: number;
+	lostLife?: boolean;
 	hintTags?: string[];
+	hintQuote?: string | null;
 	reveal?: VnReveal;
+}
+
+export interface VnCompletedSurvivalRound {
+	roundIndex: number;
+	stageUsed: number;
+	points: number;
+	lostLife: boolean;
+	vnStatus: TileStatus;
+	guessedTitle: string;
+	reveal: VnReveal;
 }
 
 export type ListStatus = 'COMPLETED' | 'CURRENT' | 'PAUSED' | 'DROPPED' | 'REPEATING';

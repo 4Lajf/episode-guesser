@@ -182,6 +182,19 @@ export function saveVnDailyRecord(playerId: string, record: VnDailyServerRecord)
 	}
 }
 
+export function listPlayerVnDailyRecords(playerId: string): VnDailyServerRecord[] {
+	hydrateFromDisk();
+	const prefix = `${playerId}|`;
+	const out: VnDailyServerRecord[] = [];
+	const now = Date.now();
+	for (const [k, rec] of store) {
+		if (k.startsWith(prefix) && now - rec.updatedAt <= RECORD_TTL_MS) {
+			out.push(rec);
+		}
+	}
+	return out;
+}
+
 export function clearVnDailyStoreForTests(): void {
 	if (flushTimer) {
 		clearTimeout(flushTimer);

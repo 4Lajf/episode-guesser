@@ -1,10 +1,10 @@
-import type { VnReveal, VnUiSubMode } from '$lib/types';
+import type { VnReveal } from '$lib/types';
 
 export interface SealedVnRoundSecret {
 	typ: 'vn-round';
 	v: 1;
 	roundId: string;
-	subMode: VnUiSubMode;
+	subMode: 'daily' | 'practice' | 'survival';
 	playerId: string;
 	dailyDate?: string;
 	createdAt: number;
@@ -19,6 +19,7 @@ export interface SealedVnRoundSecret {
 	targetLengthBucket: number;
 	targetDevelopers: string[];
 	hintTags: string[];
+	hintQuote?: string | null;
 	reveal: VnReveal;
 }
 
@@ -26,9 +27,10 @@ export interface SealedVnState {
 	typ: 'vn-state';
 	v: 1;
 	roundId: string;
-	subMode: VnUiSubMode;
+	subMode: 'daily' | 'practice' | 'survival';
 	playerId: string;
 	dailyDate?: string;
+	stage: 1 | 2 | 3 | 4 | 5;
 	attemptsUsed: number;
 	finished: boolean;
 	usedKeys: string[];

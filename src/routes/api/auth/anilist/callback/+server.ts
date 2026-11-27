@@ -10,6 +10,13 @@ import { getDailyRecord, listPlayerDailyRecords, saveDailyRecord } from '$lib/se
 import { hasLeaderboardEntry, recordDailyLeaderboardResult } from '$lib/server/leaderboardStore';
 import type { SealedDailyState, SealedRoundSecret } from '$lib/server/picker';
 import { sealPayload, unsealPayload } from '$lib/server/token';
+import {
+	getVnDailyRecord,
+	listPlayerVnDailyRecords,
+	saveVnDailyRecord
+} from '$lib/server/vnDailyStore';
+import { recordVnLeaderboardResult } from '$lib/server/vnLeaderboardStore';
+import type { SealedVnRoundSecret, SealedVnState } from '$lib/server/vnSession';
 import type { AuthUser } from '$lib/types';
 import type { RequestHandler } from './$types';
 
@@ -148,6 +155,28 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 					attempts: guestRec.attempts,
 					won: guestRec.won,
 					startedAt: unsealedRound.createdAt
+				});
+			}
+		}
+
+		// Also claim guest Daily VN UI records into the AniList account & VN Leaderboard
+		const guestVnRecs = listPlayerVnDailyRecords(guestPid);
+		for (const gVn of guestVnRecs) {
+			if (getVnDailyRecord(authPlayerId, gVn.date)) continue;
+			const unsealedR = unsealPayload<SealedVnRoundSecret>(gVn.roundToken);
+			const unsealedS = unsealPayload<SealedVnState>(gVn.stateToken);
+			if (!unsealedR || !unsealedS) continue;
+			saveVnDailyRecord(authPlayerId, {
+				...gVn,
+				roundToken: sealPayload<SealedVnRoundSecret>({ ...unsealedR, playerId: authPlayerId }),
+				stateToken: sealPayload<SealedVnState>({ ...unsealedS, playerId: authPlayerId })
+			});
+			if (gVn.finished) {
+				recordVnLeaderboardResult({
+					date: gVn.date,
+					user: authUser,
+					attempts: gVn.attempts,
+					won: gVn.won
 				});
 			}
 		}
