@@ -382,9 +382,21 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 		});
 
 		const base = 1_700_000_000_000;
+		const animeHitEpMiss = evaluateWordleAttempt({
+			attemptNumber: 1,
+			guessedTitle: 'Sousou no Frieren',
+			guessedEpisode: 10,
+			guessedYear: 2023,
+			targetTitles: ['Sousou no Frieren'],
+			franchiseTitles: [],
+			actualEpisode: 3,
+			actualYear: 2023,
+			totalEpisodes: 28
+		});
+
 		recordDailyLeaderboardResult({
 			date,
-			user: { anilistUserId: 101, username: 'SlowTwo', avatar: null, siteUrl: 'https://anilist.co/user/SlowTwo' },
+			user: { anilistUserId: 101, username: 'LateTwo', avatar: null, siteUrl: 'https://anilist.co/user/LateTwo' },
 			attempts: [missAttempt, { ...winAttempt, attemptNumber: 2 }],
 			won: true,
 			startedAt: base,
@@ -392,8 +404,8 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 		});
 		recordDailyLeaderboardResult({
 			date,
-			user: { anilistUserId: 102, username: 'FastTwo', avatar: null, siteUrl: 'https://anilist.co/user/FastTwo' },
-			attempts: [missAttempt, { ...winAttempt, attemptNumber: 2 }],
+			user: { anilistUserId: 102, username: 'EarlyAnimeTwo', avatar: null, siteUrl: 'https://anilist.co/user/EarlyAnimeTwo' },
+			attempts: [animeHitEpMiss, { ...winAttempt, attemptNumber: 2 }],
 			won: true,
 			startedAt: base + 500_000,
 			completedAt: base + 530_000
@@ -409,7 +421,7 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 		// Duplicate submission for user 101 must NOT overwrite their recorded 2/5 result
 		recordDailyLeaderboardResult({
 			date,
-			user: { anilistUserId: 101, username: 'SlowTwo', avatar: null, siteUrl: 'https://anilist.co/user/SlowTwo' },
+			user: { anilistUserId: 101, username: 'LateTwo', avatar: null, siteUrl: 'https://anilist.co/user/LateTwo' },
 			attempts: [winAttempt],
 			won: true,
 			startedAt: base,
@@ -419,7 +431,8 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 		const board = getDailyLeaderboard(date, 102, true);
 		expect(board.totalPlayers).toBe(3);
 		expect(board.solvedCount).toBe(3);
-		expect(board.entries.map((e) => e.username)).toEqual(['OneShot', 'FastTwo', 'SlowTwo']);
+		expect(board.entries.map((e) => e.username)).toEqual(['OneShot', 'EarlyAnimeTwo', 'LateTwo']);
+		expect(board.entries.map((e) => e.points)).toEqual([1000, 875, 850]);
 		expect(board.me?.rank).toBe(2);
 		expect(board.entries[2].attemptsUsed).toBe(2);
 		clearLeaderboardStoreForTests();

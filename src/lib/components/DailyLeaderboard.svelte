@@ -69,9 +69,9 @@
 			</h2>
 			<p class="lb-sub">
 				{#if leaderboard && leaderboard.totalPlayers > 0}
-					{leaderboard.totalPlayers} {leaderboard.totalPlayers === 1 ? 'player' : 'players'} · {leaderboard.solvedCount} solved
+					{leaderboard.totalPlayers} {leaderboard.totalPlayers === 1 ? 'player' : 'players'} · {leaderboard.solvedCount} solved · Ranked by Daily points (up to 1,000)
 				{:else}
-					Ranked by fewest guesses
+					Ranked by Daily points (up to 1,000)
 				{/if}
 			</p>
 		</div>
@@ -117,7 +117,7 @@
 				Rank <b class="tnum">#{leaderboard.me.rank}</b> of <span class="tnum">{leaderboard.totalPlayers}</span> as <b>{authUser.username}</b>
 			</span>
 			<span class="lb-me-stat tnum">
-				{formatOutcome(leaderboard.me.entry)}
+				{leaderboard.me.entry.points.toLocaleString('en-US')} pts · {formatOutcome(leaderboard.me.entry)}
 			</span>
 		</div>
 	{/if}
@@ -167,7 +167,10 @@
 					</div>
 
 					<div class="lb-score">
-						<span class="lb-outcome tnum" class:won={entry.won}>
+						<span class="lb-points tnum" class:won={entry.won}>
+							{entry.points.toLocaleString('en-US')} pts
+						</span>
+						<span class="lb-outcome tnum">
 							{formatOutcome(entry)}
 						</span>
 					</div>
@@ -441,18 +444,26 @@
 
 	.lb-score {
 		display: flex;
-		align-items: center;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 1px;
 		white-space: nowrap;
 	}
 
-	.lb-outcome {
-		font-size: 14px;
-		font-weight: 700;
-		color: var(--text-2);
+	.lb-points {
+		font-size: 14.5px;
+		font-weight: 750;
+		color: var(--paper);
 	}
 
-	.lb-outcome.won {
+	.lb-points.won {
 		color: var(--green);
+	}
+
+	.lb-outcome {
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--text-3);
 	}
 
 	.lb-empty {
@@ -466,13 +477,38 @@
 	}
 
 	@media (max-width: 640px) {
-		.lb-tiles {
-			display: none;
+		.lb-row {
+			grid-template-columns: 34px minmax(0, 1fr) auto;
+			grid-template-areas:
+				'rank user score'
+				'. tiles tiles';
+			row-gap: 6px;
+			column-gap: 8px;
+			padding: 10px 6px;
 		}
 
-		.lb-row {
-			grid-template-columns: 36px minmax(0, 1fr) auto;
-			gap: 8px;
+		.lb-rank {
+			grid-area: rank;
+		}
+
+		.lb-user {
+			grid-area: user;
+		}
+
+		.lb-score {
+			grid-area: score;
+		}
+
+		.lb-tiles {
+			grid-area: tiles;
+			display: flex;
+			flex-wrap: wrap;
+			gap: 5px;
+		}
+
+		.sq {
+			width: 7px;
+			height: 12px;
 		}
 	}
 </style>

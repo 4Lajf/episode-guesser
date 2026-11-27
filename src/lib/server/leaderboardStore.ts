@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { getDailyPuzzleNumber } from '$lib/scoring';
+import { calculateDailyLeaderboardPoints, getDailyPuzzleNumber } from '$lib/scoring';
 import type {
 	AuthUser,
 	DailyLeaderboardEntry,
@@ -100,6 +100,18 @@ function pruneOldDates(): void {
 	}
 }
 
+function ensureEntryPoints(entry: DailyLeaderboardEntry): DailyLeaderboardEntry {
+	const hasFranchiseHit = Array.isArray(entry.tiles) && entry.tiles.some((t) => t.a === 'close');
+	const points = calculateDailyLeaderboardPoints({
+		won: entry.won,
+		gaveUp: entry.gaveUp,
+		attemptsUsed: entry.attemptsUsed,
+		animeHitAttempt: entry.animeHitAttempt,
+		hasFranchiseHit
+	});
+	return entry.points === points ? entry : { ...entry, points };
+}
+
 function hydrateFromDisk(): void {
 	if (hydrated) return;
 	hydrated = true;
@@ -116,7 +128,7 @@ function hydrateFromDisk(): void {
 			const map = new Map<number, DailyLeaderboardEntry>();
 			for (const entry of entries) {
 				if (entry && typeof entry.anilistUserId === 'number' && entry.username) {
-					map.set(entry.anilistUserId, entry);
+					map.set(entry.anilistUserId, ensureEntryPoints(entry));
 				}
 			}
 			if (map.size > 0) boardsByDate.set(date, map);
@@ -143,26 +155,18 @@ export function compareLeaderboardEntries(
 	a: DailyLeaderboardEntry,
 	b: DailyLeaderboardEntry
 ): number {
-	// 1. Solved always beats unsolved
+	// 1. Higher Daily points always ranks first (won > fewer attempts > earlier anime hit > franchise)
+	const ptsA = typeof a.points === 'number' ? a.points : ensureEntryPoints(a).points;
+	const ptsB = typeof b.points === 'number' ? b.points : ensureEntryPoints(b).points;
+	if (ptsA !== ptsB) return ptsB - ptsA;
+
+	// 2. Solved beats unsolved on equal points
 	if (a.won !== b.won) return a.won ? -1 : 1;
 
-	if (a.won && b.won) {
-		// 2. Fewer attempts (tighter zoom solve!) wins
-		if (a.attemptsUsed !== b.attemptsUsed) return a.attemptsUsed - b.attemptsUsed;
-		// 3. Faster solve duration (timezone-fair tiebreaker)
-		if (a.solveMs !== b.solveMs) return a.solveMs - b.solveMs;
-		return a.completedAt - b.completedAt;
-	}
+	// 3. Fewer attempts first
+	if (a.attemptsUsed !== b.attemptsUsed) return a.attemptsUsed - b.attemptsUsed;
 
-	// Unsolved comparison: played to end > gave up
-	if (a.gaveUp !== b.gaveUp) return a.gaveUp ? 1 : -1;
-
-	// Found the anime earlier > found later > never found
-	const aHit = a.animeHitAttempt ?? 99;
-	const bHit = b.animeHitAttempt ?? 99;
-	if (aHit !== bHit) return aHit - bHit;
-
-	if (a.solveMs !== b.solveMs) return a.solveMs - b.solveMs;
+	// 4. Clean deterministic tiebreaker
 	return a.completedAt - b.completedAt;
 }
 
@@ -190,6 +194,14 @@ export function recordDailyLeaderboardResult(params: {
 	const solveMs = Math.max(1_000, Math.min(rawDuration > 0 ? rawDuration : 60_000, 24 * 60 * 60 * 1000));
 	const gaveUp = params.attempts.some((a) => Boolean(a.gaveUp));
 	const animeHitAttempt = params.attempts.find((a) => a.animeStatus === 'hit')?.attemptNumber ?? null;
+	const hasFranchiseHit = params.attempts.some((a) => a.animeStatus === 'close');
+	const points = calculateDailyLeaderboardPoints({
+		won: params.won,
+		gaveUp,
+		attemptsUsed: params.attempts.length,
+		animeHitAttempt,
+		hasFranchiseHit
+	});
 
 	const entry: DailyLeaderboardEntry = {
 		anilistUserId: params.user.anilistUserId,
@@ -200,6 +212,7 @@ export function recordDailyLeaderboardResult(params: {
 		gaveUp,
 		attemptsUsed: params.attempts.length,
 		animeHitAttempt,
+		points,
 		solveMs,
 		completedAt,
 		tiles: params.attempts.map((a) => ({

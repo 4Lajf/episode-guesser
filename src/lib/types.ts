@@ -50,6 +50,7 @@ export interface DailyLeaderboardEntry {
 	gaveUp: boolean;
 	attemptsUsed: number;
 	animeHitAttempt: number | null;
+	points: number;
 	solveMs: number;
 	completedAt: number;
 	tiles: LeaderboardAttemptSummary[];

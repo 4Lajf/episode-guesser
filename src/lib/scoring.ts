@@ -423,3 +423,33 @@ export function getNextClassicRankHint(totalScore: number, maxScore: number): st
 	}
 	return 'Top rank achieved';
 }
+
+/**
+ * Calculates Daily Leaderboard points on a 0–1,000 scale:
+ * - Solved in 1..5 guesses: 1000 / 850 / 700 / 550 / 400 base points
+ *   plus +25 pts for each attempt earlier the anime itself was identified
+ *   (strictly preserving fewer total guesses > more total guesses).
+ * - Unsolved (missed episode after finding anime): 200..300 pts (or 150 if gave up after finding anime).
+ * - Same franchise hit without finding the exact anime: 100 pts.
+ */
+export function calculateDailyLeaderboardPoints(params: {
+	won: boolean;
+	gaveUp: boolean;
+	attemptsUsed: number;
+	animeHitAttempt: number | null;
+	hasFranchiseHit?: boolean;
+}): number {
+	const attempts = Math.min(WORDLE_MAX_ATTEMPTS, Math.max(1, Math.round(params.attemptsUsed)));
+	if (params.won) {
+		const solveBase = [1000, 850, 700, 550, 400][attempts - 1] ?? 400;
+		const hitAt = params.animeHitAttempt ?? attempts;
+		const earlyAnimeBonus = Math.max(0, attempts - hitAt) * 25;
+		return Math.min(1000, solveBase + earlyAnimeBonus);
+	}
+	if (params.animeHitAttempt !== null && params.animeHitAttempt >= 1) {
+		if (params.gaveUp) return 150;
+		return 200 + Math.max(0, WORDLE_MAX_ATTEMPTS - params.animeHitAttempt) * 25;
+	}
+	if (params.hasFranchiseHit) return 100;
+	return 0;
+}
