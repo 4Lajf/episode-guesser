@@ -1,4 +1,5 @@
 import type { Cookies } from '@sveltejs/kit';
+import { env } from '$env/dynamic/private';
 import type { AuthUser } from '$lib/types';
 import { sealPayload, unsealPayload } from './token';
 
@@ -28,8 +29,8 @@ interface SealedOAuthState {
 }
 
 export function getAniListOAuthConfig(): { clientId: string; clientSecret: string } | null {
-	const clientId = (process.env.ANILIST_CLIENT_ID || '').trim();
-	const clientSecret = (process.env.ANILIST_CLIENT_SECRET || '').trim();
+	const clientId = (env.ANILIST_CLIENT_ID || process.env.ANILIST_CLIENT_ID || '').trim();
+	const clientSecret = (env.ANILIST_CLIENT_SECRET || process.env.ANILIST_CLIENT_SECRET || '').trim();
 	if (!clientId || !clientSecret) return null;
 	return { clientId, clientSecret };
 }
@@ -39,7 +40,7 @@ export function isAniListOAuthConfigured(): boolean {
 }
 
 export function getAniListRedirectUri(origin: string): string {
-	const explicit = (process.env.ANILIST_REDIRECT_URI || '').trim();
+	const explicit = (env.ANILIST_REDIRECT_URI || process.env.ANILIST_REDIRECT_URI || '').trim();
 	if (explicit) return explicit;
 	return `${origin}/api/auth/anilist/callback`;
 }
