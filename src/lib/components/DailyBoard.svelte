@@ -295,7 +295,7 @@
 						{
 							status: a.episodeStatus,
 							glyph:
-								a.episodeStatus === 'hit'
+								a.episodeStatus === 'hit' || a.episodeDirection === 'exact'
 									? 'hit'
 									: a.episodeDirection === 'up'
 										? 'up'
@@ -607,7 +607,7 @@
 							{/if}
 
 							<rect x="504" y={y} width="56" height="36" rx="5" fill={svgCellFill(a.episodeStatus)} />
-							{#if a.episodeStatus === 'hit'}
+							{#if a.episodeStatus === 'hit' || a.episodeDirection === 'exact'}
 								<path
 									d="M{532 - 8} {cy + 0.5}L{532 - 2.5} {cy + 6}L{532 + 8} {cy - 6}"
 									fill="none"

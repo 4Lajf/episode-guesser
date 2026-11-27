@@ -10,9 +10,9 @@
 	import PlayerSetupModal from '$lib/components/PlayerSetupModal.svelte';
 	import RoundReveal from '$lib/components/RoundReveal.svelte';
 	import SessionBar from '$lib/components/SessionBar.svelte';
-	import { CURATED_GLOBAL_POOL } from '$lib/curated';
 	import {
 		CLASSIC_ROUNDS,
+		CURATED_POOL_SIZE,
 		dropdownDedupeKey,
 		getTodayUtcDate,
 		normalizeTitle,
@@ -51,8 +51,8 @@
 	let profile = $state<PublicProfile>({
 		username: 'Global Pool',
 		avatar: null,
-		totalEntries: CURATED_GLOBAL_POOL.length,
-		eligibleShows: CURATED_GLOBAL_POOL.length,
+		totalEntries: CURATED_POOL_SIZE,
+		eligibleShows: CURATED_POOL_SIZE,
 		isGlobalPool: true,
 		statuses: ['COMPLETED', 'CURRENT'],
 		includeSingleEp: false,
@@ -74,6 +74,7 @@
 	let mode = $state<GameMode>('classic');
 	let roundLoading = $state(false);
 	let roundError = $state<string | null>(null);
+	let roundNotice = $state<string | null>(null);
 	let guessInlineError = $state<string | null>(null);
 	let submitting = $state(false);
 	let lightboxOpen = $state(false);
@@ -191,7 +192,10 @@
 		let maxEp: number | null = null;
 		for (const a of dailyAttempts) {
 			if (a.guessedEpisode <= 0) continue;
-			if (a.episodeDirection === 'up') {
+			if (a.episodeDirection === 'exact') {
+				minEp = a.guessedEpisode;
+				maxEp = a.guessedEpisode;
+			} else if (a.episodeDirection === 'up') {
 				minEp = Math.max(minEp, a.guessedEpisode + 1);
 			} else if (a.episodeDirection === 'down') {
 				const cand = Math.max(1, a.guessedEpisode - 1);
@@ -407,14 +411,15 @@
 		}
 	}
 
-	async function fetchRound(targetMode: GameMode, preserveError: string | null = null) {
+	async function fetchRound(targetMode: GameMode, notice: string | null = null) {
 		const seq = ++roundRequestSeq;
 		activeRoundAbort?.abort();
 		const controller = new AbortController();
 		activeRoundAbort = controller;
 
 		roundLoading = true;
-		roundError = preserveError;
+		roundError = null;
+		roundNotice = notice;
 		guessInlineError = null;
 		if (targetMode === 'classic') classicReveal = null;
 		else if (targetMode === 'unlimited') unlimitedReveal = null;
@@ -851,6 +856,17 @@
 			{/if}
 		</h1>
 
+		{#if roundNotice}
+			<div class="shell">
+				<div class="anilist-nudge" role="status">
+					<span>{roundNotice}</span>
+					<button type="button" class="nudge-dismiss" onclick={() => (roundNotice = null)}>
+						Dismiss
+					</button>
+				</div>
+			</div>
+		{/if}
+
 		{#if roundError}
 			<div class="shell">
 				<div class="error-banner" role="alert">
@@ -943,9 +959,7 @@
 							nextLabel={mode === 'classic' && classicRoundIndex + 1 >= CLASSIC_ROUNDS
 								? 'View final summary'
 								: 'Next frame'}
-							afterSummary={mode === 'classic'
-								? `Total ${classicScore.toLocaleString('en-US')} · round ${classicRoundIndex + 1} of ${CLASSIC_ROUNDS}`
-								: `Total ${unlimitedScore.toLocaleString('en-US')}`}
+							afterSummary=""
 							shortcutsEnabled={!setupOpen && !lightboxOpen}
 							onNext={advanceAfterReveal}
 						/>

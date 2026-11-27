@@ -35,7 +35,7 @@
 	const modes: Array<{ id: GameMode; label: string }> = [
 		{ id: 'classic', label: 'Classic' },
 		{ id: 'unlimited', label: 'Unlimited' },
-		{ id: 'daily', label: 'Daily Wordle' }
+		{ id: 'daily', label: 'Daily frame' }
 	];
 </script>
 
@@ -78,6 +78,9 @@
 							<span class="daily-dot" aria-hidden="true"></span>
 						{/if}
 						<span>{item.label}</span>
+						{#if item.id === 'daily' && dailyUnplayed}
+							<span class="sr-only"> (unplayed today)</span>
+						{/if}
 					</button>
 				{/each}
 			</nav>

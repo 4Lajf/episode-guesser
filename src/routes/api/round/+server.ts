@@ -9,7 +9,8 @@ import {
 } from '$lib/scoring';
 import { fetchAniListProfile, sanitizeStatuses } from '$lib/server/anilist';
 import { getDailyRecord } from '$lib/server/dailyStore';
-import { pickRoundFromPool } from '$lib/server/picker';
+import { pickRoundFromPool, type SealedRoundSecret } from '$lib/server/picker';
+import { unsealPayload } from '$lib/server/token';
 import type { GameMode, ListStatus, RoundPayload } from '$lib/types';
 import type { RequestHandler } from './$types';
 
@@ -78,7 +79,8 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 		// anonymous/cookie-less traffic from filling daily-store.json.
 		if (mode === 'daily') {
 			const existing = getDailyRecord(playerId, todayUtc, scopeKey);
-			if (existing) {
+			const existingValid = existing ? unsealPayload<SealedRoundSecret>(existing.roundToken) : null;
+			if (existing && existingValid && existingValid.typ === 'round') {
 				const restored: RoundPayload = {
 					roundToken: existing.roundToken,
 					dailyStateToken: existing.dailyStateToken,

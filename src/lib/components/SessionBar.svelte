@@ -315,5 +315,9 @@
 		.tally dd {
 			font-size: 19px;
 		}
+
+		.scope-link {
+			margin-left: -6px;
+		}
 	}
 </style>

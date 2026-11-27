@@ -10,6 +10,7 @@ import type {
 export const WORDLE_ZOOM_STEPS = [2.2, 1.6, 1.3, 1.1, 1.0] as const;
 export const WORDLE_MAX_ATTEMPTS = 5;
 export const CLASSIC_ROUNDS = 5;
+export const CURATED_POOL_SIZE = 249;
 
 const DAILY_EPOCH_MS = Date.UTC(2026, 0, 1);
 

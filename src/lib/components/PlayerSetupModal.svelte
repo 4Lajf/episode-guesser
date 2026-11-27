@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { CURATED_GLOBAL_POOL } from '$lib/curated';
+	import { CURATED_POOL_SIZE } from '$lib/scoring';
 	import type { ListStatus } from '$lib/types';
 
 	interface Props {
@@ -208,7 +208,7 @@
 			</div>
 
 			<button type="button" class="btn-global" disabled={loading} onclick={onUseGlobal}>
-				Play with curated Global Pool ({CURATED_GLOBAL_POOL.length} iconic anime)
+				Play with curated Global Pool ({CURATED_POOL_SIZE} popular anime)
 			</button>
 		</div>
 	</div>

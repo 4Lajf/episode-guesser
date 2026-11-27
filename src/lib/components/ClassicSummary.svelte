@@ -48,7 +48,7 @@
 			<button type="button" class="outline" onclick={copySummary}>
 				{copied ? 'Copied results' : 'Copy results'}
 			</button>
-			<button type="button" class="quiet" onclick={onSwitchDaily}>Try Daily Wordle</button>
+			<button type="button" class="quiet" onclick={onSwitchDaily}>Try Daily frame</button>
 		</div>
 	</div>
 

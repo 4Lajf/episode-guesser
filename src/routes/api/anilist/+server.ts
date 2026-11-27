@@ -45,7 +45,9 @@ export const GET: RequestHandler = async ({ url }) => {
 		if (profile.eligibleShows === 0) {
 			return json(
 				{
-					error: `No eligible multi-episode shows found for "${profile.username}" with the selected statuses.`
+					error: includeSingleEp
+						? `No eligible shows found for "${profile.username}" with the selected statuses.`
+						: `No eligible multi-episode shows found for "${profile.username}" with the selected statuses.`
 				},
 				{ status: 404 }
 			);

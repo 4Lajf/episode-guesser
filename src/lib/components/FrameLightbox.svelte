@@ -40,11 +40,15 @@
 		role="dialog"
 		aria-modal="true"
 		aria-label="Full-size episode screencap"
-		tabindex="-1"
-		onclick={onClose}
-		onkeydown={(e) => e.key === 'Escape' && onClose()}
 	>
-		<div class="lightbox-frame" onclick={(e) => e.stopPropagation()} role="presentation">
+		<button
+			type="button"
+			class="backdrop-dismiss"
+			tabindex="-1"
+			aria-label="Close full-size image"
+			onclick={onClose}
+		></button>
+		<div class="lightbox-frame">
 			<button
 				bind:this={closeBtnEl}
 				type="button"
@@ -71,8 +75,18 @@
 		padding: 20px;
 	}
 
+	.backdrop-dismiss {
+		position: absolute;
+		inset: 0;
+		border: 0;
+		padding: 0;
+		background: transparent;
+		cursor: default;
+	}
+
 	.lightbox-frame {
 		position: relative;
+		z-index: 1;
 		max-width: 96vw;
 		max-height: 92vh;
 		display: flex;
@@ -98,10 +112,8 @@
 	}
 
 	.lightbox-img {
-		max-width: 96vw;
-		max-height: calc(92vh - 48px);
-		width: auto;
-		height: auto;
+		width: min(92vw, calc((90vh - 52px) * 16 / 9));
+		aspect-ratio: 16 / 9;
 		object-fit: contain;
 		border-radius: var(--r);
 		border: 1px solid var(--line);

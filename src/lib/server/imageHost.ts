@@ -21,7 +21,7 @@ export function isAllowedImageUrl(raw: unknown): raw is string {
 	if (typeof raw !== 'string') return false;
 	try {
 		const parsed = new URL(raw);
-		if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+		if (parsed.protocol !== 'https:') return false;
 		return ALLOWED_IMAGE_HOSTS.has(parsed.hostname.toLowerCase());
 	} catch {
 		return false;

@@ -3,6 +3,7 @@ import { CURATED_GLOBAL_POOL } from '../src/lib/curated';
 import {
 	buildClassicShareText,
 	buildWordleShareText,
+	CURATED_POOL_SIZE,
 	evaluateClassicGuess,
 	evaluateWordleAttempt,
 	getDailyPuzzleNumber,
@@ -269,6 +270,8 @@ describe('spoiler protection, curated pool integrity, image allowlist & tokens',
 		}
 		const ylia = CURATED_GLOBAL_POOL.find((x) => x.titleRomaji === 'Shigatsu wa Kimi no Uso');
 		expect(ylia?.id).toBe(20665);
+		expect(CURATED_GLOBAL_POOL.length).toBe(CURATED_POOL_SIZE);
+		expect(CURATED_GLOBAL_POOL.length).toBeGreaterThanOrEqual(200);
 	});
 
 	it('restricts image proxy hosts and protocols strictly', () => {
