@@ -1,0 +1,109 @@
+export type GameMode = 'classic' | 'unlimited' | 'daily';
+
+export type ListStatus = 'COMPLETED' | 'CURRENT' | 'PAUSED' | 'DROPPED' | 'REPEATING';
+
+export interface AnimePoolItem {
+	id: number;
+	episodes: number | null;
+	progress: number;
+	status: ListStatus;
+	format: string | null;
+	seasonYear: number | null;
+	titleRomaji: string;
+	titleEnglish: string | null;
+	titleNative: string | null;
+	synonyms: string[];
+	franchiseTitles: string[];
+	genres: string[];
+	studio: string | null;
+	coverImage: string | null;
+}
+
+export interface AniListProfile {
+	username: string;
+	avatar: string | null;
+	totalEntries: number;
+	eligibleShows: number;
+	isGlobalPool: boolean;
+	statuses: ListStatus[];
+	includeSingleEp: boolean;
+	titlesForDropdown: string[];
+	pool: AnimePoolItem[];
+}
+
+export interface RoundPayload {
+	roundToken: string;
+	imageUrl: string;
+	mode: GameMode;
+	dailyStateToken?: string;
+	dailyMeta?: {
+		date: string;
+		puzzleNumber: number;
+		scopeLabel: string;
+		originX: number;
+		originY: number;
+		maxAttempts: number;
+		zoomSteps: number[];
+	};
+}
+
+export interface EpisodeReveal {
+	anilistId: number;
+	titleRomaji: string;
+	titleEnglish: string | null;
+	episodeNumber: number;
+	totalEpisodes: number;
+	episodeTitle: string | null;
+	airDate: string | null;
+	overview: string | null;
+	seasonYear: number | null;
+	studio: string | null;
+	coverImage: string | null;
+	imageUrl: string;
+	anilistUrl: string;
+}
+
+export interface ClassicGuessResponse {
+	mode: 'classic' | 'unlimited';
+	skipped: boolean;
+	guessedTitle: string;
+	guessedEpisode: number | null;
+	animeMatch: 'exact' | 'franchise' | 'wrong';
+	animePoints: number;
+	episodePoints: number;
+	totalPoints: number;
+	episodeDistance: number | null;
+	episodeLabel: string;
+	reveal: EpisodeReveal;
+}
+
+export type TileStatus = 'hit' | 'close' | 'miss';
+export type Direction = 'up' | 'down' | 'exact' | null;
+
+export interface WordleAttemptFeedback {
+	attemptNumber: number;
+	guessedTitle: string;
+	guessedEpisode: number;
+	guessedYear: number | null;
+	animeStatus: TileStatus;
+	yearStatus: TileStatus;
+	yearDirection: Direction;
+	episodeStatus: TileStatus;
+	episodeDirection: Direction;
+	solved: boolean;
+}
+
+export interface WordleGuessResponse {
+	mode: 'daily';
+	attempt: WordleAttemptFeedback;
+	finished: boolean;
+	won: boolean;
+	dailyStateToken: string;
+	nextImageUrl: string;
+	reveal?: EpisodeReveal;
+}
+
+export interface CompletedClassicRound {
+	roundIndex: number;
+	result: ClassicGuessResponse;
+}

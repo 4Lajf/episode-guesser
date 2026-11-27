@@ -1,0 +1,94 @@
+@import 'tailwindcss';
+
+:root {
+	--ink-0: #0d131a;
+	--ink-1: #131b24;
+	--ink-2: #1a2430;
+	--ink-3: #223040;
+	--stage-black: #070a0f;
+
+	--rule: #263241;
+	--rule-strong: #3a4a5f;
+
+	--text: #edf1f6;
+	--text-2: #b4c0cf;
+	--text-3: #90a0b4;
+
+	--lamp: #f4c752;
+	--lamp-hover: #f8d474;
+	--lamp-ink: #161105;
+	--lamp-soft: rgba(244, 199, 82, 0.14);
+	--lamp-glow: rgba(244, 199, 82, 0.08);
+
+	--hit: #5bcb95;
+	--hit-soft: rgba(91, 203, 149, 0.17);
+	--hit-ink: #082317;
+
+	--close: #f4c752;
+	--close-soft: rgba(244, 199, 82, 0.16);
+
+	--miss: #2a3545;
+	--miss-text: #c2cdd9;
+	--danger: #e46c7c;
+	--danger-soft: rgba(228, 108, 124, 0.16);
+
+	--dir: #314054;
+
+	--radius-sm: 6px;
+	--radius-md: 10px;
+	--radius-lg: 14px;
+
+	--font-body: 'Zen Kaku Gothic New', system-ui, -apple-system, sans-serif;
+	--font-display: 'Archivo Narrow', 'Arial Narrow', system-ui, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	min-height: 100%;
+	background: var(--ink-0);
+	color: var(--text);
+	font-family: var(--font-body);
+	font-size: 15px;
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+	font-family: var(--font-display);
+	font-variant-numeric: tabular-nums;
+	letter-spacing: 0.01em;
+}
+
+.tabular {
+	font-variant-numeric: tabular-nums;
+}
+
+button,
+input,
+select {
+	font-family: inherit;
+}
+
+:focus-visible {
+	outline: 2px solid var(--lamp);
+	outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}
