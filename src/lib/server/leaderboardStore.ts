@@ -68,8 +68,8 @@ async function flushToDiskAsync(): Promise<void> {
 		const tmpPath = `${storeFile}.${process.pid}.tmp`;
 		await writeFile(tmpPath, serializeStore(), 'utf8');
 		await rename(tmpPath, storeFile);
-	} catch {
-		// non-fatal
+	} catch (err) {
+		console.error('[leaderboardStore] failed to persist to disk:', err);
 	} finally {
 		flushInFlight = false;
 		if (dirtyAfterFlush) {
@@ -212,8 +212,20 @@ export function recordDailyLeaderboardResult(params: {
 
 	dayMap.set(params.user.anilistUserId, entry);
 	pruneOldDates();
-	schedulePersist();
+	ensureShutdownHooks();
+	if (flushTimer) {
+		clearTimeout(flushTimer);
+		flushTimer = null;
+	}
+	void flushToDiskAsync();
 	return entry;
+}
+
+export function getTotalLeaderboardEntries(): number {
+	hydrateFromDisk();
+	let total = 0;
+	for (const map of boardsByDate.values()) total += map.size;
+	return total;
 }
 
 export function hasLeaderboardEntry(date: string, anilistUserId: number): boolean {

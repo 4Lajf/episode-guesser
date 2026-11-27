@@ -73,8 +73,8 @@ async function flushToDiskAsync(): Promise<void> {
 		const tmpPath = `${storeFile}.${process.pid}.tmp`;
 		await writeFile(tmpPath, serializeStore(), 'utf8');
 		await rename(tmpPath, storeFile);
-	} catch {
-		// non-fatal
+	} catch (err) {
+		console.error('[dailyStore] failed to persist to disk:', err);
 	} finally {
 		flushInFlight = false;
 		if (dirtyAfterFlush) {
@@ -176,7 +176,21 @@ export function saveDailyRecord(playerId: string, record: DailyServerRecord): vo
 	pruneOld();
 	const key = makeKey(playerId, record.date, record.scopeKey);
 	store.set(key, { ...record, updatedAt: Date.now() });
-	schedulePersist();
+	if (record.finished) {
+		ensureShutdownHooks();
+		if (flushTimer) {
+			clearTimeout(flushTimer);
+			flushTimer = null;
+		}
+		void flushToDiskAsync();
+	} else {
+		schedulePersist();
+	}
+}
+
+export function getDailyStoreCount(): number {
+	hydrateFromDisk();
+	return store.size;
 }
 
 export function listPlayerDailyRecords(

@@ -28,7 +28,6 @@ COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 RUN apk add --no-cache curl \
   && mkdir -p /app/.cache \
   && chown -R node:node /app/.cache
-VOLUME ["/app/.cache"]
 
 USER node
 
